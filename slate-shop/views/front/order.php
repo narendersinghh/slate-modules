@@ -39,7 +39,7 @@ $addr = static function (?array $a): string {
   <?php elseif ($open && $o['provider'] === 'stripe'): ?>
     <div class="shop-box">
       <?php if ($status === 'pending' && isset($_GET['session_id'])): ?>
-        <p>We are waiting for the payment confirmation. This usually takes a few seconds — <a href="<?= e($self) ?>">refresh this page</a>.</p>
+        <p>We are waiting for the payment confirmation. This usually takes a few seconds, <a href="<?= e($self) ?>">refresh this page</a>.</p>
       <?php else: ?>
         <p>This order has not been paid yet.</p>
       <?php endif; ?>

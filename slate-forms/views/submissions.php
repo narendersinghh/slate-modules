@@ -21,11 +21,7 @@ if (!isset($_GET['id'])) {
     }
 }
 
-echo AdminUi::tabs([
-    'inbox' => ['Submissions', $self, Forms::newCount() ?: null],
-    'forms' => ['Forms', admin_url('content/form')],
-    'settings' => ['Settings', AdminUi::settingsUrl('slate-forms')],
-], 'inbox');
+// Page tabs (Submissions, Settings) are drawn by the dashboard for every module.
 
 // ---------------------------------------------------------------- one submission (?id=, also linked from notification emails)
 if (($sid = (int)($_GET['id'] ?? 0)) > 0):
@@ -63,7 +59,7 @@ if (($sid = (int)($_GET['id'] ?? 0)) > 0):
       <dl class="sub-detail">
         <?php foreach ($rows as $r): ?>
           <dt><?= e($r['label']) ?></dt>
-          <dd><?php if ($r['value'] === ''): ?><span class="muted">—</span><?php elseif (filter_var($r['value'], FILTER_VALIDATE_EMAIL)): ?><a href="mailto:<?= e($r['value']) ?>"><?= e($r['value']) ?></a><?php elseif (filter_var($r['value'], FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $r['value'])): ?><a href="<?= e($r['value']) ?>" target="_blank" rel="noopener noreferrer"><?= e($r['value']) ?></a><?php else: ?><?= e($r['value']) ?><?php endif; ?></dd>
+          <dd><?php if ($r['value'] === ''): ?><span class="muted">-</span><?php elseif (filter_var($r['value'], FILTER_VALIDATE_EMAIL)): ?><a href="mailto:<?= e($r['value']) ?>"><?= e($r['value']) ?></a><?php elseif (filter_var($r['value'], FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $r['value'])): ?><a href="<?= e($r['value']) ?>" target="_blank" rel="noopener noreferrer"><?= e($r['value']) ?></a><?php else: ?><?= e($r['value']) ?><?php endif; ?></dd>
         <?php endforeach; ?>
       </dl>
     </div>
@@ -86,7 +82,7 @@ if (($sid = (int)($_GET['id'] ?? 0)) > 0):
         <span>Received</span><span><?= e(local_date($s['created_at'], 'M j, Y H:i')) ?></span>
         <?php if ($s['page_url']): ?><span>Page</span><span><a href="<?= e($s['page_url']) ?>" target="_blank" rel="noopener"><?= e($s['page_title'] ?: $s['page_url']) ?></a></span><?php endif; ?>
         <span>Status</span><span><?= e(Forms::STATUSES[$s['status']] ?? $s['status']) ?></span>
-        <span>IP address</span><span><?= e($s['ip'] ?: '—') ?></span>
+        <span>IP address</span><span><?= e($s['ip'] ?: '-') ?></span>
         <?php if ($s['user_agent']): ?><span>Browser</span><span class="small muted"><?= e($s['user_agent']) ?></span><?php endif; ?>
         <?php if ($s['source'] !== 'slate'): ?><span>Source</span><span>Imported from the previous website</span><?php endif; ?>
       </div>

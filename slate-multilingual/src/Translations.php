@@ -212,7 +212,7 @@ final class Translations
         }
         $options = [];
         foreach (Languages::all() as $code => $l) {
-            $label = $l['native'] . ($l['native'] !== $l['name'] ? ' — ' . $l['name'] : '');
+            $label = $l['native'] . ($l['native'] !== $l['name'] ? ', ' . $l['name'] : '');
             if ($code === Languages::default()) {
                 $label .= ' (default)';
             } elseif (empty($l['enabled'])) {
@@ -263,7 +263,7 @@ final class Translations
             }
         }
         $parts = [];
-        $parts[] = $have ? 'Translations — ' . implode('; ', $have) . '.' : 'No translations yet.';
+        $parts[] = $have ? 'Translations, ' . implode('; ', $have) . '.' : 'No translations yet.';
         if ($missing) {
             $parts[] = 'Missing: ' . implode(', ', $missing) . '.';
         }
@@ -271,7 +271,7 @@ final class Translations
         return implode(' ', $parts);
     }
 
-    /** post_before_save: an item cannot share its language with another item of its group — detach it instead. */
+    /** post_before_save: an item cannot share its language with another item of its group, detach it instead. */
     public static function beforeSave(mixed $row, mixed $id = null): mixed
     {
         if (!is_array($row) || !Languages::isActive() || !Languages::isTranslatable((string)($row['type'] ?? ''))) {

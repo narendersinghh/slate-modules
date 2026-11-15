@@ -1,6 +1,6 @@
 <?php
 /**
- * WordPress Importer — migrate a WordPress / Elementor site to Slate, keep its design and URLs.
+ * WordPress Importer, migrate a WordPress / Elementor site to Slate, keep its design and URLs.
  */
 declare(strict_types=1);
 
@@ -252,12 +252,12 @@ Hooks::add('cli_commands', static function (array $commands): array {
             }
             $s = $scan['summary'];
             $conn['url'] = $s['url'];
-            $out('  Site: ' . $s['site'] . ($s['auth'] ? '  (signed in as ' . $s['user'] . ')' : '  (public access only — drafts, menus and settings need an application password)'));
+            $out('  Site: ' . $s['site'] . ($s['auth'] ? '  (signed in as ' . $s['user'] . ')' : '  (public access only, drafts, menus and settings need an application password)'));
             foreach ($scan['counts']['types'] ?? [] as $wp => $c) {
                 $out(sprintf('  %-22s %5d  → %s', $wp, $c['total'], $c['slug']));
             }
             $out(sprintf('  %-22s %5s', 'media', (string)($s['media'] ?? '?')));
-            $out('  Detected: ' . (implode(', ', array_filter([$s['elementor'] ? 'Elementor' : null, $s['seo'] ?: null, $s['acf'] ? 'ACF' : null])) ?: '—'));
+            $out('  Detected: ' . (implode(', ', array_filter([$s['elementor'] ? 'Elementor' : null, $s['seo'] ?: null, $s['acf'] ? 'ACF' : null])) ?: '-'));
             Options::set('wpi_conn', $conn, false);
             Options::set('wpi_scan', $scan, false);
             $types = !empty($opts['types']) ? array_map('trim', explode(',', (string)$opts['types'])) : array_keys($scan['counts']['types'] ?? []);

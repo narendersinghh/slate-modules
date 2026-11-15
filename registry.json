@@ -36,7 +36,7 @@
     {
       "slug": "auto-cpt-generator",
       "name": "Auto CPT Generator",
-      "description": "Automatically create post types, taxonomies and custom fields — from a live WordPress site, a WordPress export file, a plain-English description (AI) or a JSON spec.",
+      "description": "Automatically create post types, taxonomies and custom fields, from a live WordPress site, a WordPress export file, a plain-English description (AI) or a JSON spec.",
       "version": "1.1.0",
       "requires": "0.13.0",
       "author": "Slate",

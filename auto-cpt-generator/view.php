@@ -21,7 +21,7 @@ if ($tab === 'history') {
         'when' => ['label' => 'Date', 'primary' => true, 'sort' => 'created_at', 'render' => static fn($r) => '<strong>' . e(local_date($r['created_at'], $fmt)) . '</strong>',
             'export' => static fn($r) => (string)$r['created_at']],
         'what' => ['label' => 'What changed', 'render' => static fn($r) => e((string)$r['object'])],
-        'by' => ['label' => 'By', 'render' => static fn($r) => e((string)($r['display_name'] ?: $r['username'] ?: '—'))],
+        'by' => ['label' => 'By', 'render' => static fn($r) => e((string)($r['display_name'] ?: $r['username'] ?: '-'))],
     ], [
         'base' => $base, 'search' => 'Search…', 'sort' => 'created_at', 'dir' => 'desc', 'export' => true,
         'empty' => ['icon' => 'clock', 'title' => 'Nothing generated yet', 'text' => 'Each time you create a content model here it is listed with what changed.'],
@@ -41,7 +41,7 @@ if ($tab === 'history') {
     $rows = DB::all($sql . ' LIMIT ' . (int)$s['per'] . ' OFFSET ' . (int)$s['offset'], $params);
 }
 
-echo AdminUi::header('Auto CPT generator', 'Create post types, taxonomies and custom fields from an existing site or a short description — you review everything before it is created.', 'sparkles',
+echo AdminUi::header('Auto CPT generator', 'Create post types, taxonomies and custom fields from an existing site or a short description, you review everything before it is created.', 'sparkles',
     ['Content model' => [admin_url('model/types'), 'ghost', 'layers']]);
 echo AdminUi::kpis(['Custom post types' => count($customTypes), 'Taxonomies' => count($taxes), 'Field groups' => count($groups)]);
 echo AdminUi::tabs(['generate' => ['Generate', $base], 'history' => ['History', $base . '?tab=history', $runCount ?: null]], $tab);
@@ -58,7 +58,7 @@ $existing = [
 ];
 ?>
 <div class="stack" data-acg data-base="<?= e($base) ?>" data-existing="<?= e(json_encode($existing)) ?>">
-  <nav class="tabs-pill" aria-label="Steps" style="align-self:flex-start" data-steps>
+  <nav class="wizard-steps" aria-label="Steps" data-steps>
     <button type="button" class="active" data-goto="source"><span>1</span> Choose source</button>
     <button type="button" data-goto="review" disabled><span>2</span> Review</button>
     <button type="button" data-goto="done" disabled><span>3</span> Create</button>
@@ -100,7 +100,7 @@ $existing = [
       </div>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small">Nothing is created yet — next you'll review the result.</span>
+      <span class="muted small">Nothing is created yet, next you'll review the result.</span>
       <button type="button" class="btn btn-primary" data-analyse data-ai-ready="<?= Ai::enabled() ? '1' : '0' ?>"><?= icon('search', 15) ?> <span>Analyse</span></button>
     </div>
   </section>
@@ -172,7 +172,7 @@ document.addEventListener('DOMContentLoaded', function () {
       const res = await fetch(base + path, { method: 'POST', credentials: 'same-origin', body: isForm ? body : JSON.stringify(body),
         headers: Object.assign({ 'X-CSRF-Token': SLATE.csrf, 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, isForm ? {} : { 'Content-Type': 'application/json' }) });
       try { return await res.json(); } catch (e) { return { ok: false, error: 'Server error (' + res.status + ')' }; }
-    } catch (e) { return { ok: false, error: 'Network error — ' + e.message }; }
+    } catch (e) { return { ok: false, error: 'Network error, ' + e.message }; }
   };
   const go = (step) => {
     $$('[data-step]').forEach((s) => { s.hidden = s.dataset.step !== step; });
@@ -182,7 +182,7 @@ document.addEventListener('DOMContentLoaded', function () {
   };
   $$('[data-goto]').forEach((b) => b.addEventListener('click', () => go(b.dataset.goto)));
 
-  // Step 1 — source
+  // Step 1, source
   const analyse = $('[data-analyse]');
   const setSource = (v) => {
     source = v;
@@ -214,7 +214,7 @@ document.addEventListener('DOMContentLoaded', function () {
     show(r.spec);
   });
 
-  // Step 2 — review
+  // Step 2, review
   const tag = (isNew) => isNew ? '<span class="pill pill-info">new</span>' : '<span class="pill">update</span>';
   const check = (kind, i) => '<td class="col-check"><input type="checkbox" checked data-pick="' + kind + '" data-i="' + i + '" aria-label="Include"></td>';
   const empty = (cols, text) => '<tr><td colspan="' + cols + '" class="muted">' + esc(text) + '</td></tr>';
@@ -224,9 +224,9 @@ document.addEventListener('DOMContentLoaded', function () {
     $('[data-rows="post_types"]').innerHTML = pts.length ? pts.map((t, i) => '<tr>' + check('post_types', i) + '<td><strong>' + esc(t.plural || t.singular || t.slug) + '</strong></td><td><code>'
       + esc(t.slug || '') + '</code></td><td class="muted">/' + esc(t.rewrite || t.slug || '') + '/</td><td>' + tag(!existing.types.includes(t.slug)) + '</td></tr>').join('') : empty(5, 'No new post types.');
     $('[data-rows="taxonomies"]').innerHTML = (spec.taxonomies || []).length ? spec.taxonomies.map((t, i) => '<tr>' + check('taxonomies', i) + '<td><strong>' + esc(t.plural || t.slug) + '</strong><br><small class="muted">' + esc(t.slug || '') + '</small></td><td>'
-      + esc((t.post_types || []).join(', ') || '—') + '</td><td>' + tag(!existing.taxonomies.includes(t.slug)) + '</td></tr>').join('') : empty(4, 'No taxonomies.');
+      + esc((t.post_types || []).join(', ') || '-') + '</td><td>' + tag(!existing.taxonomies.includes(t.slug)) + '</td></tr>').join('') : empty(4, 'No taxonomies.');
     $('[data-rows="field_groups"]').innerHTML = (spec.field_groups || []).length ? spec.field_groups.map((g, i) => '<tr>' + check('field_groups', i) + '<td><strong>' + esc(g.title || 'Fields') + '</strong><br><small class="muted">'
-      + esc((g.fields || []).map((f) => (f.label || f.name) + ' (' + (f.type || 'text') + ')').join(', ')) + '</small></td><td>' + esc([...(g.post_types || []), ...(g.taxonomies || [])].join(', ') || '—') + '</td><td>'
+      + esc((g.fields || []).map((f) => (f.label || f.name) + ' (' + (f.type || 'text') + ')').join(', ')) + '</small></td><td>' + esc([...(g.post_types || []), ...(g.taxonomies || [])].join(', ') || '-') + '</td><td>'
       + tag(!existing.groups.includes(String(g.title || '').toLowerCase())) + '</td></tr>').join('') : empty(4, 'No custom fields.');
     const b = $('[data-steps] [data-goto="review"]'); b.disabled = false;
     go('review');
@@ -235,7 +235,7 @@ document.addEventListener('DOMContentLoaded', function () {
     try { show(JSON.parse($('[data-spec]').value || '{}')); toast('Preview updated'); } catch (e) { toast('The JSON is not valid', 'error'); }
   });
 
-  // Step 3 — create
+  // Step 3, create
   $('[data-apply]').addEventListener('click', async (e) => {
     let full;
     try { full = JSON.parse($('[data-spec]').value || '{}'); } catch (err) { return toast('The JSON is not valid', 'error'); }

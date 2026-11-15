@@ -1,6 +1,6 @@
 <?php
 /**
- * Auto CPT Generator — create post types, taxonomies and custom fields automatically.
+ * Auto CPT Generator, create post types, taxonomies and custom fields automatically.
  */
 declare(strict_types=1);
 

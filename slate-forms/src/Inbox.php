@@ -65,17 +65,17 @@ final class Inbox
                 foreach (self::preview($s) as $r) {
                     $out .= '<div class="small"><span class="muted">' . e($r['label']) . ':</span> ' . e(mb_strimwidth($r['value'], 0, 90, '…')) . '</div>';
                 }
-                return $out ?: '<span class="muted">—</span>';
+                return $out ?: '<span class="muted">-</span>';
             }],
             'form' => ['label' => 'Form', 'sort' => 'form', 'render' => static fn(array $s) => e($s['form_title'])],
             'page' => ['label' => 'Page', 'render' => static function (array $s): string {
                 if ($s['page_url'] === '') {
-                    return '<span class="muted">—</span>';
+                    return '<span class="muted">-</span>';
                 }
                 return '<a href="' . e($s['page_url']) . '" target="_blank" rel="noopener">' . e($s['page_title'] ?: ((string)parse_url($s['page_url'], PHP_URL_PATH) ?: $s['page_url'])) . '</a>';
             }, 'export' => static fn(array $s) => (string)$s['page_url']],
             'status' => ['label' => 'Status', 'default' => false, 'sort' => 'status', 'render' => static fn(array $s) => e(Forms::STATUSES[$s['status']] ?? $s['status'])],
-            'ip' => ['label' => 'IP address', 'default' => false, 'render' => static fn(array $s) => e($s['ip'] ?: '—')],
+            'ip' => ['label' => 'IP address', 'default' => false, 'render' => static fn(array $s) => e($s['ip'] ?: '-')],
             'received' => ['label' => 'Received', 'sort' => 'id', 'sort_dir' => 'desc', 'class' => 'nowrap', 'render' => static fn(array $s) => e(local_date($s['created_at'], 'M j, Y H:i')),
                 'export' => static fn(array $s) => (string)$s['created_at']],
         ], [

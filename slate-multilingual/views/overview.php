@@ -48,7 +48,7 @@ $pct = static fn(int $n, int $of): int => $of > 0 ? (int)floor($n * 100 / $of) :
     'Translatable items' => number_format($items),
     'Translated' => $pct($done, $needed) . '%',
     'Still to translate' => number_format(max(0, $needed - $done)),
-    'Strings translated' => $strings ? $pct($stringsDone, count($strings) * count($extra)) . '%' : '—',
+    'Strings translated' => $strings ? $pct($stringsDone, count($strings) * count($extra)) . '%' : '-',
 ]) ?>
 
 <section class="card">

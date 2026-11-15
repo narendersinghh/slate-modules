@@ -24,7 +24,7 @@ php bin/slate module:activate slate-forms
 
 ## Publishing a module here
 
-1. Add a folder with `module.json` (with `slug`, `version`, `source`) and `module.php` — see Slate's `docs/modules.md`.
+1. Add a folder with `module.json` (with `slug`, `version`, `source`) and `module.php`, see Slate's `docs/modules.md`.
 2. Add an entry to `registry.json` (`download` = the folder address).
 3. Bump `version` in both places for every release; sites then see **Update** in Modules.
 

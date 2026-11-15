@@ -1,5 +1,5 @@
 <?php
-/** Translations: every translatable item with its translation in each language — create, open, link, unlink. */
+/** Translations: every translatable item with its translation in each language, create, open, link, unlink. */
 use Slate\AdminUi;
 use Slate\Auth;
 use Slate\ContentModel;
@@ -88,7 +88,7 @@ foreach ($langs as $code => $l) {
                 return '<button class="btn btn-sm" type="submit" formaction="' . e($action('translate')) . '" name="pair" value="' . (int)$r['source']['id'] . ':' . e($code) . '">'
                     . icon('plus', 13) . ' Translate</button>';
             }
-            return '<span class="muted">—</span>';
+            return '<span class="muted">-</span>';
         },
         'export' => static fn(array $r) => isset($r['langs'][$code]) ? (Posts::STATUSES[$r['langs'][$code]['status']] ?? $r['langs'][$code]['status']) . ' #' . $r['langs'][$code]['id'] : 'Missing',
     ];
@@ -158,7 +158,7 @@ echo $t->render(array_slice($rows, $s['offset'], $s['per']), count($rows));
 ?>
 
 <details class="card" style="margin-top:20px">
-  <summary class="card-pad" style="cursor:pointer"><strong>Link items that already exist</strong> <span class="muted small">— for translations written before this module, or created by hand</span></summary>
+  <summary class="card-pad" style="cursor:pointer"><strong>Link items that already exist</strong> <span class="muted small">for translations written before this module, or created by hand</span></summary>
   <form method="post" action="<?= e(admin_url('m/' . Admin::SLUG . '/link')) ?>" class="card-pad" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;padding-top:0">
     <?= csrf_field() ?><input type="hidden" name="return" value="<?= e($return) ?>">
     <span>Item #</span><input class="input input-sm" type="number" name="id" min="1" required style="width:110px" aria-label="Item ID">

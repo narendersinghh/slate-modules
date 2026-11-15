@@ -59,7 +59,7 @@ if ($editId > 0):
       <dl class="kv">
         <dt>On</dt><dd><?= $itemLink($post) ?></dd>
         <dt>Received</dt><dd><?= e(local_date((string)$c['created_at'], 'M j, Y H:i')) ?></dd>
-        <dt>IP address</dt><dd><?= e($c['ip'] ?: '—') ?></dd>
+        <dt>IP address</dt><dd><?= e($c['ip'] ?: '-') ?></dd>
         <?php if ($c['user_agent'] !== ''): ?><dt>Browser</dt><dd class="small muted"><?= e($c['user_agent']) ?></dd><?php endif; ?>
       </dl>
     </div></section>

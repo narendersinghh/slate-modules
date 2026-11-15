@@ -14,7 +14,7 @@ $general = array_intersect_key($errors, array_flip(['cart', 'payment']));
 ?>
 <div class="shop-checkout">
   <h1 class="shop-title"><?= e($title) ?></h1>
-  <?php if ($cancelled): ?><p class="shop-notice" role="status">Payment was cancelled. Your cart is still here — you can try again.</p><?php endif; ?>
+  <?php if ($cancelled): ?><p class="shop-notice" role="status">Payment was cancelled. Your cart is still here, you can try again.</p><?php endif; ?>
   <?php if (trim((string)Shop::setting('checkout_intro')) !== ''): ?><p class="shop-intro"><?= nl2br(e((string)Shop::setting('checkout_intro'))) ?></p><?php endif; ?>
   <?php foreach ($general as $msg): ?><p class="shop-error" role="alert"><?= e($msg) ?></p><?php endforeach; ?>
   <?php if ($errors && !$general && !isset($errors['provider'])): ?><p class="shop-error" role="alert">Please check the highlighted fields.</p><?php endif; ?>

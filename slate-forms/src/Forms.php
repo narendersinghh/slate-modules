@@ -410,7 +410,7 @@ final class Forms
         $replyTo = '';
         foreach ($data as $row) {
             $v = is_array($row['value']) ? implode(', ', $row['value']) : (string)$row['value'];
-            $body .= $row['label'] . ":\n" . ($v === '' ? '—' : $v) . "\n\n";
+            $body .= $row['label'] . ":\n" . ($v === '' ? '-' : $v) . "\n\n";
             if (!$replyTo && $row['type'] === 'email' && filter_var($v, FILTER_VALIDATE_EMAIL)) {
                 $replyTo = $v;
             }

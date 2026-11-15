@@ -1,5 +1,5 @@
 <?php
-/** Languages: the website's languages — add, order, choose the default, switch on/off. */
+/** Languages: the website's languages, add, order, choose the default, switch on/off. */
 use SlateModules\Multilingual\Admin;
 use SlateModules\Multilingual\Languages;
 
@@ -89,12 +89,12 @@ $codes = array_keys($langs);
       <select class="input" id="ml-preset" name="preset">
         <option value="">Choose…</option>
         <?php foreach (Languages::PRESETS as $code => $p): if (isset($langs[$code])) continue; ?>
-          <option value="<?= e($code) ?>"><?= e($p[0] . ($p[1] !== $p[0] ? ' — ' . $p[1] : '')) ?></option>
+          <option value="<?= e($code) ?>"><?= e($p[0] . ($p[1] !== $p[0] ? ', ' . $p[1] : '')) ?></option>
         <?php endforeach; ?>
       </select>
     </div>
     <div class="field" style="--w:50%">
-      <label class="switch-row" style="margin-top:26px"><input type="hidden" name="enabled" value="0"><input type="checkbox" class="switch" name="enabled" value="1"><span>Visible to visitors now <small class="muted">— leave off while you translate</small></span></label>
+      <label class="switch-row" style="margin-top:26px"><input type="hidden" name="enabled" value="0"><input type="checkbox" class="switch" name="enabled" value="1"><span>Visible to visitors now <small class="muted">leave off while you translate</small></span></label>
     </div>
     <details class="field" style="--w:100%">
       <summary class="small muted" style="cursor:pointer">Not in the list, or a custom address?</summary>

@@ -1,6 +1,6 @@
 <?php
 /**
- * Shop — products, signed-cookie cart, checkout, orders, Stripe Checkout / Razorpay / manual payments.
+ * Shop, products, signed-cookie cart, checkout, orders, Stripe Checkout / Razorpay / manual payments.
  */
 declare(strict_types=1);
 

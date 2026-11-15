@@ -80,7 +80,7 @@ echo AdminUi::header('Order ' . Orders::number($o), 'Placed ' . local_date($o['c
         <?php if (!$o['history']): ?><p class="muted">Nothing yet.</p><?php else: ?>
         <ul class="list list-compact">
           <?php foreach (array_reverse($o['history']) as $h): ?>
-            <li><span class="muted small nowrap"><?= e(local_date((string)($h['at'] ?? ''), 'M j, Y H:i')) ?></span> — <?= e((string)($h['msg'] ?? '')) ?></li>
+            <li><span class="muted small nowrap"><?= e(local_date((string)($h['at'] ?? ''), 'M j, Y H:i')) ?></span>, <?= e((string)($h['msg'] ?? '')) ?></li>
           <?php endforeach; ?>
         </ul>
         <?php endif; ?>

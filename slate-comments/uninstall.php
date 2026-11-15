@@ -1,6 +1,6 @@
 <?php
 /**
- * Comments — remove all data: the comments table and the module's options.
+ * Comments, remove all data: the comments table and the module's options.
  * Runs when the module is deleted with "Also delete its data".
  */
 declare(strict_types=1);

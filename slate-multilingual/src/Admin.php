@@ -50,9 +50,10 @@ final class Admin
         return admin_url('m/' . self::slug($page)) . ($query ? '?' . http_build_query($query) : '');
     }
 
-    /** Tabs shared by every page (only the ones the user may open). */
+    /** Page tabs are drawn by the dashboard for every module (Slate 0.13), so nothing to print here. */
     public static function nav(string $current): string
     {
+        return '';
         $tabs = [];
         foreach (self::PAGES + ['settings' => ['Settings', 'manage_settings', 'settings']] as $key => [$label, $cap]) {
             if (Auth::can($cap)) {
@@ -392,7 +393,7 @@ final class Admin
         }
         Session::flash('success', !empty($res['existed'])
             ? 'This ' . Languages::native((string)$lang) . ' translation already exists.'
-            : Languages::native((string)$lang) . ' translation created as a draft — translate it and publish.');
+            : Languages::native((string)$lang) . ' translation created as a draft, translate it and publish.');
         redirect(admin_url('content/' . $post['type'] . '/' . $post['id']));
     }
 

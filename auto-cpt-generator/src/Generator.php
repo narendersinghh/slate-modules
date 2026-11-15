@@ -422,7 +422,7 @@ final class Generator
             }
             ContentModel::saveTaxonomy(['slug' => $slug, 'singular' => strip_tags($x['singular']), 'plural' => strip_tags($x['plural']), 'post_types' => $pts,
                 'hierarchical' => (bool)$x['hierarchical'], 'public' => true, 'rewrite' => $rewrite, 'nested' => (bool)($x['nested'] ?? true)]);
-            $log[] = "Created taxonomy “{$x['plural']}” for " . (implode(', ', $pts) ?: '—');
+            $log[] = "Created taxonomy “{$x['plural']}” for " . (implode(', ', $pts) ?: '-');
         }
         $groups = ContentModel::fieldGroups();
         foreach ($spec['field_groups'] as $g) {
@@ -445,7 +445,7 @@ final class Generator
             $log[] = ($existing ? 'Updated' : 'Created') . " field group “{$g['title']}” (" . count($fields) . ' fields)';
         }
         PageCache::clear();
-        return $log ?: ['Nothing to create — the content model already matches.'];
+        return $log ?: ['Nothing to create, the content model already matches.'];
     }
 
     /** Slugify each URL segment but keep %taxonomy% tokens. */

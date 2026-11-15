@@ -102,7 +102,7 @@ final class Config
             ['key' => $p . 'notify_email', 'type' => 'email', 'label' => 'Email new comments to', 'default' => $d['notify_email'], 'placeholder' => 'Leave empty for no emails',
                 'help' => 'Spam is never emailed. The comment.created webhook event fires too (Settings → Integrations → Webhooks).'],
             ['key' => $p . 'api_count', 'type' => 'toggle', 'label' => 'Add comments_count to REST API items', 'default' => $d['api_count'],
-                'help' => 'Approved comments are also listed at /api/v1/comments/{id} (names, websites and text only — never emails or IP addresses).'],
+                'help' => 'Approved comments are also listed at /api/v1/comments/{id} (names, websites and text only, never emails or IP addresses).'],
         ], ['help' => 'Where comments appear, how they are moderated and who is told about them.', 'cap' => 'manage_settings', 'render' => [self::class, 'renderTypes']]);
         Hooks::add('settings_saved', [self::class, 'saved']);
     }

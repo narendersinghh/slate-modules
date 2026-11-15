@@ -1,6 +1,6 @@
 <?php
 /**
- * Multilingual — removes the module's settings and string translations. Content is never deleted: items keep their
+ * Multilingual, removes the module's settings and string translations. Content is never deleted: items keep their
  * "_lang" / "_tgroup" custom fields (harmless without the module) and every translation stays a normal item.
  */
 declare(strict_types=1);

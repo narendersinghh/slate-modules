@@ -79,7 +79,7 @@ final class Importer
             $wp = self::client($conn);
             $root = $wp->get('/');
             if (!$root['ok']) {
-                throw new \RuntimeException('Could not reach the WordPress REST API at ' . $wp->site . ' — ' . $root['error']);
+                throw new \RuntimeException('Could not reach the WordPress REST API at ' . $wp->site . ', ' . $root['error']);
             }
             $spec = Generator::fromWordPress($wp);
             $media = $wp->get('/wp/v2/media', ['per_page' => 1]);

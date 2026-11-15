@@ -1,6 +1,6 @@
 <?php
 /**
- * Forms — form builder (Content → Forms), Form widget / field / template tag, submissions inbox.
+ * Forms, form builder (Content → Forms), Form widget / field / template tag, submissions inbox.
  */
 declare(strict_types=1);
 
@@ -69,7 +69,7 @@ Hooks::add('admin_routes', static function (Router $r): void {
         Forms::install();
         $state = null;
         if (input('all_matching')) {
-            // Every submission matching the list's search, view and filters — not just this page.
+            // Every submission matching the list's search, view and filters, not just this page.
             parse_str((string)input('query'), $get);
             $saved = $_GET;
             $_GET = $get;

@@ -363,11 +363,11 @@ final class Orders
                 $mail($shopTo, "New order $num (awaiting payment)", "New order $num", 'A new order was placed and is waiting for payment.', true);
                 break;
             case 'paid':
-                $mail($customer, "Order $num confirmed — $site", 'Payment received', 'Thank you! Your payment was received and your order is confirmed.', false);
+                $mail($customer, "Order $num confirmed, $site", 'Payment received', 'Thank you! Your payment was received and your order is confirmed.', false);
                 $mail($shopTo, "New paid order $num", "Paid order $num", 'A new order was paid and is ready to be processed.', true);
                 break;
             case 'status':
-                $mail($customer, "Order $num is now " . strtolower(self::label($order['status'])) . " — $site", 'Order update',
+                $mail($customer, "Order $num is now " . strtolower(self::label($order['status'])) . ", $site", 'Order update',
                     'The status of your order is now: ' . self::label($order['status']) . '.', false);
                 break;
         }

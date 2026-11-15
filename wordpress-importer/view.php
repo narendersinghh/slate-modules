@@ -62,11 +62,11 @@ if ($tab === 'items') {
             ? '<a class="row-title" href="' . e($r['edit']) . '">' . e($r['title']) . '</a>' : '<strong>' . e($r['title']) . '</strong>',
             'export' => static fn($r) => $r['title']],
         'type' => ['label' => 'Type', 'sort' => 'type', 'render' => static fn($r) => e($r['type'])],
-        'status' => ['label' => 'Status', 'render' => static fn($r) => $r['status'] !== '' ? '<span class="status status-' . e($r['status']) . '">' . e(['publish' => 'Published'][$r['status']] ?? ucfirst($r['status'])) . '</span>' : '<span class="muted">—</span>',
+        'status' => ['label' => 'Status', 'render' => static fn($r) => $r['status'] !== '' ? '<span class="status status-' . e($r['status']) . '">' . e(['publish' => 'Published'][$r['status']] ?? ucfirst($r['status'])) . '</span>' : '<span class="muted">-</span>',
             'export' => static fn($r) => $r['status']],
-        'old' => ['label' => 'Old URL', 'sort' => 'old', 'render' => static fn($r) => $r['old'] !== '' ? '<a class="cell-link small" href="' . e($r['old']) . '" target="_blank" rel="noopener" title="' . e($r['old']) . '">' . e($shortUrl($r['old'])) . '</a>' : '<span class="muted">—</span>',
+        'old' => ['label' => 'Old URL', 'sort' => 'old', 'render' => static fn($r) => $r['old'] !== '' ? '<a class="cell-link small" href="' . e($r['old']) . '" target="_blank" rel="noopener" title="' . e($r['old']) . '">' . e($shortUrl($r['old'])) . '</a>' : '<span class="muted">-</span>',
             'export' => static fn($r) => $r['old']],
-        'new' => ['label' => 'New URL', 'render' => static fn($r) => $r['url'] !== '' ? '<a class="cell-link small" href="' . e($r['url']) . '" target="_blank" rel="noopener" title="' . e($r['url']) . '">' . e($shortUrl($r['url'])) . '</a>' : '<span class="muted">—</span>',
+        'new' => ['label' => 'New URL', 'render' => static fn($r) => $r['url'] !== '' ? '<a class="cell-link small" href="' . e($r['url']) . '" target="_blank" rel="noopener" title="' . e($r['url']) . '">' . e($shortUrl($r['url'])) . '</a>' : '<span class="muted">-</span>',
             'export' => static fn($r) => $r['url']],
         'id' => ['label' => 'Slate ID', 'sort' => 'id', 'default' => false, 'align' => 'right', 'render' => static fn($r) => (string)(int)$r['id']],
     ], [
@@ -138,7 +138,7 @@ if ($tab === 'history') {
         'source' => ['label' => 'Source', 'render' => static fn($r) => $r['source'] !== '' ? e($r['source']) : '<span class="muted">Export file</span>'],
         'status' => ['label' => 'Result', 'render' => static fn($r) => $r['finished'] ? AdminUi::pill('Finished', 'success') : AdminUi::pill('Not finished', 'warn'),
             'export' => static fn($r) => $r['finished'] ? 'Finished' : 'Not finished'],
-        'duration' => ['label' => 'Duration', 'render' => static fn($r) => e($duration($r)) ?: '<span class="muted">—</span>', 'export' => $duration],
+        'duration' => ['label' => 'Duration', 'render' => static fn($r) => e($duration($r)) ?: '<span class="muted">-</span>', 'export' => $duration],
         'by' => ['label' => 'By', 'render' => static fn($r) => e($who($r)), 'export' => $who],
     ], [
         'base' => $base, 'search' => 'Search by source…', 'sort' => 'when', 'dir' => 'desc', 'export' => true,
@@ -158,11 +158,11 @@ if ($tab === 'history') {
 
 // ------------------------------------------------------------------ header
 
-echo AdminUi::header('Site migration', 'Move a WordPress site to Slate — content, media, SEO, menus and design — and keep every old link working.', 'download',
+echo AdminUi::header('Site migration', 'Move a WordPress site to Slate, content, media, SEO, menus and design, and keep every old link working.', 'download',
     $imported ? ['View site' => [url(), 'ghost', 'external']] : []);
 if ($imported) {
     echo AdminUi::kpis(['Pages & posts' => number_format($counts['post']), 'Media files' => number_format($counts['media']),
-        'Categories & tags' => number_format($counts['term']), 'Last import' => $lastFinished ? time_ago($lastFinished) : '—']);
+        'Categories & tags' => number_format($counts['term']), 'Last import' => $lastFinished ? time_ago($lastFinished) : '-']);
 }
 echo AdminUi::tabs([
     'migrate' => ['Migrate', $base],
@@ -224,7 +224,7 @@ $running = $job && !$job['finished_at'];
 $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', (bool)$scan], 'run' => ['3', 'Import', (bool)$job]];
 ?>
 <div class="stack" data-wpi data-base="<?= e($base) ?>">
-  <nav class="tabs-pill" aria-label="Steps" style="align-self:flex-start">
+  <nav class="wizard-steps" aria-label="Steps">
     <?php foreach ($steps as $k => [$n, $label, $reachable]): ?>
       <?php if ($reachable): ?>
         <a href="<?= e($base . '?step=' . $k) ?>"<?= $k === $step ? ' class="active" aria-current="step"' : '' ?>><span><?= $n ?></span> <?= e($label) ?></a>
@@ -259,7 +259,7 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
       </div>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small">Nothing is imported yet — next you'll see what was found.</span>
+      <span class="muted small">Nothing is imported yet, next you'll see what was found.</span>
       <button type="button" class="btn btn-primary" data-connect><?= icon('search', 15) ?> Analyse site</button>
     </div>
   </section>
@@ -279,11 +279,11 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
     <div class="card-head row-between"><h2>What we found</h2><a class="btn btn-ghost btn-sm" href="<?= e($base . '?step=source') ?>">Change source</a></div>
     <div class="card-pad">
       <div class="kv">
-        <span>Site</span><strong><?= e((string)($sum['site'] ?: '—')) ?></strong>
-        <span>Address</span><span><?= $sum['url'] ? '<a href="' . e((string)$sum['url']) . '" target="_blank" rel="noopener">' . e((string)$sum['url']) . '</a>' : '—' ?></span>
+        <span>Site</span><strong><?= e((string)($sum['site'] ?: '-')) ?></strong>
+        <span>Address</span><span><?= $sum['url'] ? '<a href="' . e((string)$sum['url']) . '" target="_blank" rel="noopener">' . e((string)$sum['url']) . '</a>' : '-' ?></span>
         <span>Access</span><span><?= ($conn['source'] ?? '') === 'wxr' ? 'Export file' : (!empty($sum['auth']) ? 'Signed in as ' . e((string)($sum['user'] ?? 'admin')) : AdminUi::pill('Public content only', 'warn') . ' <small class="muted">drafts, menus and settings need an application password</small>') ?></span>
         <span>Detected</span><span><?= e($detected ?: 'Nothing special') ?></span>
-        <span>Media files</span><span><?= e(isset($sum['media']) ? number_format((int)$sum['media']) : '—') ?></span>
+        <span>Media files</span><span><?= e(isset($sum['media']) ? number_format((int)$sum['media']) : '-') ?></span>
         <span>Menus</span><span><?= e(isset($sum['menus']) ? number_format((int)$sum['menus']) : 'Not readable') ?></span>
       </div>
     </div>
@@ -320,7 +320,7 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
         <tbody>
         <?php foreach ($scan['counts']['taxonomies'] as $wp => $c): $exists = ContentModel::taxonomy((string)$c['slug']) !== null; ?>
           <tr><td><code><?= e((string)$wp) ?></code></td><td><?= e($exists ? $taxLabel((string)$c['slug']) : (string)$c['slug']) ?> <?= $exists ? AdminUi::pill('exists') : AdminUi::pill('new', 'info') ?></td>
-            <td class="num"><?= $c['total'] === null ? '—' : number_format((int)$c['total']) ?></td></tr>
+            <td class="num"><?= $c['total'] === null ? '-' : number_format((int)$c['total']) ?></td></tr>
         <?php endforeach; ?>
         </tbody>
       </table></div>
@@ -359,7 +359,7 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
       </div>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small">About <?= number_format($total + (int)($sum['media'] ?? 0)) ?> items. Running it again later updates what was imported — it never duplicates.</span>
+      <span class="muted small">About <?= number_format($total + (int)($sum['media'] ?? 0)) ?> items. Running it again later updates what was imported, it never duplicates.</span>
       <button type="button" class="btn btn-primary" data-start><?= icon('download', 16) ?> Start import</button>
     </div>
   </section>
@@ -379,9 +379,9 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
     <div class="card-pad stack">
       <?php if ($running): ?>
         <div class="stack-sm">
-          <div class="row-between small"><span data-step-label>Ready to continue<?= $origin !== '' ? ' — ' . e($origin) : '' ?></span><span class="num" data-pct></span></div>
+          <div class="row-between small"><span data-step-label>Ready to continue<?= $origin !== '' ? ', ' . e($origin) : '' ?></span><span class="num" data-pct></span></div>
           <div class="wpi-bar"><i data-bar style="width:0"></i></div>
-          <span class="muted small">Large sites take a while. Keep this tab open — if you close it, come back and press Resume.</span>
+          <span class="muted small">Large sites take a while. Keep this tab open, if you close it, come back and press Resume.</span>
         </div>
         <div class="type-tags" data-stats><?php foreach ($stats as $k => $v): ?><span class="pill"><?= e($statLabel((string)$k)) ?>: <?= (int)$v ?></span><?php endforeach; ?></div>
       <?php else: ?>
@@ -438,10 +438,10 @@ document.addEventListener('DOMContentLoaded', function () {
         headers: Object.assign({ 'X-CSRF-Token': SLATE.csrf, 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, isForm ? {} : { 'Content-Type': 'application/json' }) });
       const t = await res.text();
       try { return JSON.parse(t); } catch (e) { return { ok: false, error: 'Server error (' + res.status + '): ' + t.replace(/<[^>]+>/g, ' ').slice(0, 300) }; }
-    } catch (e) { return { ok: false, error: 'Network error — ' + e.message }; }
+    } catch (e) { return { ok: false, error: 'Network error, ' + e.message }; }
   };
 
-  // Step 1 — source
+  // Step 1, source
   root.querySelectorAll('input[name="wpi_src"]').forEach((r) => r.addEventListener('change', () => {
     root.querySelectorAll('[data-src-panel]').forEach((p) => { p.hidden = p.dataset.srcPanel !== r.value; });
   }));
@@ -461,7 +461,7 @@ document.addEventListener('DOMContentLoaded', function () {
     location.href = base + '?step=review';
   });
 
-  // Step 2 — review
+  // Step 2, review
   $('[data-start]')?.addEventListener('click', async (e) => {
     const options = { types: [...root.querySelectorAll('[data-type]:checked')].map((c) => c.dataset.type) };
     root.querySelectorAll('[data-opt]').forEach((c) => { options[c.dataset.opt] = c.checked; });
@@ -473,7 +473,7 @@ document.addEventListener('DOMContentLoaded', function () {
     location.href = base + '?step=run&go=1';
   });
 
-  // Step 3 — run
+  // Step 3, run
   const labels = <?= json_encode(['terms' => 'Categories & tags', 'media' => 'Media files', 'media_failed' => 'Media failed', 'menus' => 'Menus', 'archives' => 'Archive pages']) ?>;
   let running = false;
   const render = (r) => {

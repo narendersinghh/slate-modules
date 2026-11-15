@@ -1,6 +1,6 @@
 <?php
 /**
- * Comments — comments on posts and any content type: moderation queue, spam protection that works with the
+ * Comments, comments on posts and any content type: moderation queue, spam protection that works with the
  * page cache, email notifications, webhooks, template tags and REST API output.
  */
 declare(strict_types=1);

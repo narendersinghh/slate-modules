@@ -1,6 +1,6 @@
 <?php
 /**
- * Multilingual — content languages, translations, language URLs (/es/…), hreflang, language switcher,
+ * Multilingual, content languages, translations, language URLs (/es/…), hreflang, language switcher,
  * template string translations and language-aware API output.
  *
  * With a single enabled language every front-end hook stays unregistered: the website behaves exactly as without
@@ -30,7 +30,7 @@ Options::lazy(Strings::OPTION);
 // Editor "Language" box (also removes a stale stored copy of it when the module is idle).
 Hooks::add('field_groups', [Translations::class, 'fieldGroups'], 20);
 
-// {{languages}} {{lang}} {{t:Text}} — harmless with one language ({{t:…}} prints the text itself).
+// {{languages}} {{lang}} {{t:Text}}, harmless with one language ({{t:…}} prints the text itself).
 Hooks::add('template_tag', [Urls::class, 'templateTag']);
 
 if (DB::connected() && Languages::isActive()) {
