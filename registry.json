@@ -45,6 +45,52 @@
         "migration",
         "ai"
       ]
+    },
+    {
+      "slug": "slate-comments",
+      "name": "Comments",
+      "description": "Privacy-friendly comments for posts and any content type: threaded replies, moderation queue, spam protection that works with the page cache (no cookies, no third parties), email notifications, webhooks and REST API output.",
+      "version": "1.0.0",
+      "requires": "0.10.0",
+      "author": "Slate",
+      "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-comments",
+      "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-comments",
+      "tags": [
+        "comments",
+        "community",
+        "moderation",
+        "engagement"
+      ]
+    },
+    {
+      "slug": "slate-multilingual",
+      "name": "Multilingual",
+      "description": "Publish your website in several languages: a language for every item, linked translations created in one click, language URLs (/es/…), automatic hreflang, html lang and social locale, per-language listings and search, a language switcher ({{languages}}), translated template strings ({{t:…}}) and language-aware REST API output.",
+      "version": "1.0.0",
+      "requires": "0.11.0",
+      "author": "Slate",
+      "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-multilingual",
+      "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-multilingual",
+      "tags": [
+        "multilingual",
+        "translation",
+        "i18n",
+        "seo"
+      ]
+    },
+    {
+      "slug": "slate-shop",
+      "name": "Shop",
+      "description": "Products, a cart, checkout and orders: sell physical or digital goods with Stripe Checkout, Razorpay or manual payment (bank transfer / cash on delivery). Template tags for prices and add-to-cart buttons, an Orders inbox and email notifications.",
+      "version": "1.0.0",
+      "requires": "0.10.0",
+      "author": "Slate",
+      "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-shop",
+      "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-shop",
+      "tags": [
+        "ecommerce",
+        "payments"
+      ]
     }
   ]
 }

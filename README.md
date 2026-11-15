@@ -8,6 +8,9 @@ Official modules for [Slate CMS](https://github.com/narendersinghh/slate), plus 
 | Forms | `slate-forms/` | Form builder, submissions inbox, email notifications, spam filtering, CSV export |
 | Site Migration | `wordpress-importer/` | Moves a WordPress/Elementor site to Slate with its content, SEO, URLs and design (`php bin/slate import:wordpress`) |
 | Auto CPT Generator | `auto-cpt-generator/` | Builds post types, taxonomies and fields from a WordPress site, a WXR export, a JSON spec or a description (AI) |
+| Comments | `slate-comments/` | Privacy-friendly comments with moderation, cache-safe spam protection, email notifications, webhooks and API output |
+| Multilingual | `slate-multilingual/` | Languages with URL prefixes (`/es/…`), linked translations, hreflang, language switcher, string translations (needs Slate 0.11) |
+| Shop | `slate-shop/` | Products, signed-cookie cart, checkout, orders, stock, manual / Stripe / Razorpay payments with verified webhooks |
 
 ## Install
 

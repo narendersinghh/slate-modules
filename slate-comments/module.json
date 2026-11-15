@@ -1,0 +1,21 @@
+{
+  "name": "Comments",
+  "slug": "slate-comments",
+  "description": "Privacy-friendly comments for posts and any content type: threaded replies, moderation queue, spam protection that works with the page cache (no cookies, no third parties), email notifications, webhooks and REST API output.",
+  "version": "1.0.0",
+  "author": "Slate",
+  "homepage": "https://github.com/narendersinghh/slate-modules",
+  "requires": "0.10.0",
+  "requires_php": "8.2",
+  "autoload": {
+    "SlateModules\\Comments\\": "src/"
+  },
+  "source": "https://github.com/narendersinghh/slate-modules/tree/main/slate-comments",
+  "settings": "comments-settings",
+  "tags": [
+    "comments",
+    "community",
+    "moderation",
+    "engagement"
+  ]
+}
