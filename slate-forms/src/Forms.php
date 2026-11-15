@@ -363,6 +363,14 @@ final class Forms
         $id = self::store($form, $data, $page, mb_substr(strip_tags((string)($_POST['_title'] ?? '')), 0, 255), $status);
         if ($status === 'new') {
             self::notify($form, $data, $page, $id);
+            if (class_exists(\Slate\Webhooks::class)) {
+                $fieldsOut = [];
+                foreach ($data as $k => $row) {
+                    $fieldsOut[is_string($k) ? $k : (string)($row['label'] ?? $k)] = $row['value'] ?? null;
+                }
+                \Slate\Webhooks::dispatch('form.submitted', ['submission_id' => $id, 'form' => ['id' => (int)$form['id'], 'title' => $form['title']],
+                    'page' => $page, 'fields' => $fieldsOut]);
+            }
         }
         Hooks::action('form_submitted', $id, $form, $data);
         $reply(true, $success, 200, $redirect);
