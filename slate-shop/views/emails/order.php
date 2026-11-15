@@ -17,7 +17,7 @@ $addr = static function (?array $a): string {
         $a['state'] ?? '', $a['country'] ?? ''], static fn($v) => trim((string)$v) !== '');
     return implode('<br>', array_map('e', $parts));
 };
-$link = $forShop ? admin_url('m/shop-orders?id=' . $o['id']) : Shop::orderUrl($o['order_key'], true);
+$link = $forShop ? \SlateModules\Shop\Admin::orderUrl((int)$o['id']) : Shop::orderUrl($o['order_key'], true);
 if ($forShop && !preg_match('#^https?://#', $link)) {
     $link = site_url(substr($link, strlen(base_path())));
 }

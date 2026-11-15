@@ -100,7 +100,7 @@ final class Forms
                         'help' => 'Optional, e.g. a privacy note. Simple HTML links are allowed.'],
                     ['name' => 'redirect_url', 'label' => 'Redirect after sending (optional)', 'type' => 'url', 'placeholder' => '/thank-you/', 'width' => '100'],
                     ['name' => 'notify_to', 'label' => 'Email notifications to', 'type' => 'text', 'width' => '100',
-                        'help' => 'Comma-separated. Empty = the admin email in Settings → General. Write "none" to turn emails off.'],
+                        'help' => 'Comma-separated. Empty = the default in Forms settings (or the admin email). Write "none" to turn emails off.'],
                     ['name' => 'email_subject', 'label' => 'Email subject', 'type' => 'text', 'placeholder' => 'New submission: {form}', 'width' => '100'],
                     ['name' => 'style', 'label' => 'Look', 'type' => 'select', 'width' => '100', 'options' => ['slate : Slate default styles', 'theme : Use the website’s own styles']],
                     ['name' => 'css_class', 'label' => 'Extra CSS classes', 'type' => 'text', 'width' => '100',
@@ -320,8 +320,8 @@ final class Forms
         if (!empty($_POST['_hp'])) {
             $reply(true, $success, 200, $redirect); // pretend success
         }
-        $recent = (int)DB::val('SELECT COUNT(*) FROM {{form_submissions}} WHERE ip = :ip AND created_at > :t', ['ip' => $ip, 't' => gmdate('Y-m-d H:i:s', time() - 3600)]);
-        if ($recent >= 15) {
+        $limit = (int)Options::get('forms_rate_limit', 15);
+        if ($limit > 0 && (int)DB::val('SELECT COUNT(*) FROM {{form_submissions}} WHERE ip = :ip AND created_at > :t', ['ip' => $ip, 't' => gmdate('Y-m-d H:i:s', time() - 3600)]) >= $limit) {
             $reply(false, 'Too many submissions from your connection. Please try again later.', 429);
         }
 
@@ -359,7 +359,8 @@ final class Forms
             $reply(false, implode("\n", $errors), 422);
         }
         $page = mb_substr(\Slate\ContentModel::cleanUrl((string)($_POST['_page'] ?? ($_SERVER['HTTP_REFERER'] ?? ''))), 0, 700);
-        $status = empty($_POST['_js']) ? 'spam' : 'new'; // bots rarely run JavaScript; keep them reviewable under Spam
+        // Bots rarely run JavaScript; keep them reviewable under Spam (setting "forms_require_js").
+        $status = empty($_POST['_js']) && Options::get('forms_require_js', true) ? 'spam' : 'new';
         $id = self::store($form, $data, $page, mb_substr(strip_tags((string)($_POST['_title'] ?? '')), 0, 255), $status);
         if ($status === 'new') {
             self::notify($form, $data, $page, $id);
@@ -400,7 +401,7 @@ final class Forms
         if (strtolower($to) === 'none') {
             return;
         }
-        $list = array_values(array_filter(array_map('trim', explode(',', $to !== '' ? $to : (string)Options::get('admin_email'))), static fn($x) => filter_var($x, FILTER_VALIDATE_EMAIL)));
+        $list = array_values(array_filter(array_map('trim', explode(',', $to !== '' ? $to : (trim((string)Options::get('forms_notify_to', '')) ?: (string)Options::get('admin_email')))), static fn($x) => filter_var($x, FILTER_VALIDATE_EMAIL)));
         if (!$list) {
             return;
         }

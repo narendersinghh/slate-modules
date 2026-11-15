@@ -314,7 +314,7 @@ final class Orders
             'notes' => (string)$order['notes'],
             'created_at' => $order['created_at'],
             'paid_at' => $order['paid_at'],
-            'admin_url' => admin_url('m/shop-orders?id=' . $order['id']),
+            'admin_url' => Admin::orderUrl((int)$order['id']),
         ];
     }
 

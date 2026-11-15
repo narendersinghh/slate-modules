@@ -4,30 +4,33 @@ declare(strict_types=1);
 namespace SlateModules\Comments;
 
 use Slate\Auth;
+use Slate\ContentModel;
 use Slate\Csrf;
 use Slate\DB;
 use Slate\Posts;
 use Slate\Session;
 
-/** Dashboard: moderation actions, list queries and the settings form. */
+/** Dashboard: moderation actions and list queries. Settings are declared in Config::register(). */
 final class Admin
 {
-    public const PER_PAGE = 30;
-
     public static function url(array $query = []): string
     {
-        $query = array_filter($query, static fn($v) => $v !== '' && $v !== null && $v !== 0);
+        $query = array_filter($query, static fn($v) => $v !== '' && $v !== null && $v !== 0 && $v !== []);
         return admin_url('m/comments') . ($query ? '?' . http_build_query($query) : '');
     }
 
-    /** Safe redirect target inside the comments screen. */
+    /** Back to the list the action came from (the form posts to the list URL, so its query string is the state). */
     private static function back(): never
     {
-        $to = (string)($_POST['return'] ?? '');
-        redirect($to !== '' && str_starts_with($to, admin_url('m/comments')) && !preg_match('/[\r\n]/', $to) ? $to : self::url());
+        $keep = array_filter($_GET, static fn($v, $k) => in_array($k, ['q', 'status', 'f', 'sort', 'dir', 'p'], true), ARRAY_FILTER_USE_BOTH);
+        redirect(self::url($keep));
     }
 
-    /** Handle a POST to the comments screen (moderation, reply, edit). Always redirects. */
+    /**
+     * Handle a POST to the comments screen. Always redirects.
+     * List form: a row action button sends one=<action>:<id>; the bulk bar sends action=<action> + ids[].
+     * Edit screen: do=edit + id.
+     */
     public static function handlePost(): never
     {
         Csrf::check();
@@ -35,13 +38,14 @@ final class Admin
             http_response_code(403);
             exit('You do not have permission to do that.');
         }
-        $do = (string)($_POST['do'] ?? '');
-        if ($do === 'bulk') {
-            $do = (string)($_POST['bulk_action'] ?? '');
-            $comments = Comments::findMany((array)($_POST['ids'] ?? []));
+        if (preg_match('/^(\w+):(\d+)$/', (string)($_POST['one'] ?? ''), $m)) {
+            [$do, $ids] = [$m[1], [(int)$m[2]]];
+        } elseif (isset($_POST['action'])) {
+            [$do, $ids] = [(string)$_POST['action'], (array)($_POST['ids'] ?? [])];
         } else {
-            $comments = Comments::findMany([(int)($_POST['id'] ?? 0)]);
+            [$do, $ids] = [(string)($_POST['do'] ?? ''), [(int)($_POST['id'] ?? 0)]];
         }
+        $comments = Comments::findMany($ids);
         if (!$comments) {
             Session::flash('error', 'Select at least one comment you are allowed to moderate.');
             self::back();
@@ -76,7 +80,7 @@ final class Admin
                 break;
             case 'edit':
                 self::edit($comments[0]);
-                break;
+                redirect(self::url(['status' => (string)($_POST['status'] ?? '')]));
             default:
                 Session::flash('error', 'Unknown action.');
                 self::back();
@@ -87,10 +91,11 @@ final class Admin
 
     private static function reply(array $parent): void
     {
-        $content = trim((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', (string)($_POST['content'] ?? '')));
+        $raw = $_POST['reply'][(int)$parent['id']] ?? '';
+        $content = trim((string)preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', is_string($raw) ? $raw : ''));
         if (mb_strlen($content) < 2 || mb_strlen($content) > Comments::MAX_CONTENT) {
             Session::flash('error', 'Write a reply of 2 to ' . number_format(Comments::MAX_CONTENT) . ' characters.');
-            redirect(self::url(['reply' => (int)$parent['id']]));
+            self::back();
         }
         $user = Auth::user() ?? [];
         // Replies stay one level deep: answering a reply answers its thread.
@@ -159,63 +164,60 @@ final class Admin
 
     // ------------------------------------------------------------------ list
 
-    /** Current filters from the query string. */
-    public static function filters(): array
-    {
-        $status = (string)($_GET['status'] ?? '');
-        return [
-            'status' => isset(Comments::STATUSES[$status]) ? $status : '',
-            'q' => trim((string)($_GET['q'] ?? '')),
-            'post' => max(0, (int)($_GET['post'] ?? 0)),
-            'pg' => max(1, (int)($_GET['pg'] ?? 1)),
-        ];
-    }
+    /** Sortable columns → SQL. */
+    private const SORTS = ['date' => 'c.created_at', 'author' => 'c.author_name'];
 
-    /** @return array{items: array, total: int} */
-    public static function query(array $f): array
+    /**
+     * Comments matching the list state (ListTable::state()). $limit = false returns every match (CSV export).
+     * @return array{items: array, total: int}
+     */
+    public static function query(array $s, bool $limit = true): array
     {
         [$scope, $params] = Comments::scopeSql();
         $where = [$scope];
-        if ($f['status'] !== '') {
+        if (isset(Comments::STATUSES[$s['view']])) {
             $where[] = 'c.status = :status';
-            $params['status'] = $f['status'];
+            $params['status'] = $s['view'];
         } else {
             $where[] = "c.status IN ('pending', 'approved')";
         }
-        if ($f['post'] > 0) {
+        if (!empty($s['filters']['post'])) {
             $where[] = 'c.post_id = :post';
-            $params['post'] = $f['post'];
+            $params['post'] = (int)$s['filters']['post'];
         }
-        if ($f['q'] !== '') {
-            $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $f['q']) . '%';
+        if (!empty($s['filters']['type'])) {
+            $where[] = 'p.type = :type';
+            $params['type'] = (string)$s['filters']['type'];
+        }
+        if ($s['q'] !== '') {
+            $like = '%' . str_replace(['!', '%', '_'], ['!!', '!%', '!_'], $s['q']) . '%';
             $where[] = "(c.author_name LIKE :q1 ESCAPE '!' OR c.author_email LIKE :q2 ESCAPE '!' OR c.content LIKE :q3 ESCAPE '!' OR c.ip LIKE :q4 ESCAPE '!')";
             $params += ['q1' => $like, 'q2' => $like, 'q3' => $like, 'q4' => $like];
         }
-        $sql = 'FROM {{comments}} c WHERE ' . implode(' AND ', $where);
+        $sql = 'FROM {{comments}} c LEFT JOIN {{posts}} p ON p.id = c.post_id WHERE ' . implode(' AND ', $where);
         $total = (int)DB::val("SELECT COUNT(*) $sql", $params);
-        $offset = ($f['pg'] - 1) * self::PER_PAGE;
-        $items = DB::all("SELECT c.* $sql ORDER BY c.created_at DESC, c.id DESC LIMIT " . self::PER_PAGE . ' OFFSET ' . (int)$offset, $params);
+        $order = (self::SORTS[$s['sort']] ?? 'c.created_at') . ($s['dir'] === 'asc' ? ' ASC' : ' DESC') . ', c.id' . ($s['dir'] === 'asc' ? ' ASC' : ' DESC');
+        $page = $limit ? ' LIMIT ' . (int)$s['per'] . ' OFFSET ' . (int)$s['offset'] : '';
+        $items = DB::all("SELECT c.* $sql ORDER BY $order$page", $params);
         Posts::prime(array_map(static fn(array $c) => (int)$c['post_id'], $items));
         return ['items' => $items, 'total' => $total];
     }
 
-    // ------------------------------------------------------------------ settings
-
-    public static function saveSettings(): never
+    /** Filter options: content types and items that have comments (in the user's scope). */
+    public static function filterOptions(): array
     {
-        Csrf::check();
-        if (!Auth::can('manage_settings')) {
-            http_response_code(403);
-            exit('You do not have permission to do that.');
+        [$scope, $sp] = Comments::scopeSql();
+        $types = [];
+        foreach (DB::col("SELECT DISTINCT p.type FROM {{comments}} c INNER JOIN {{posts}} p ON p.id = c.post_id WHERE $scope", $sp) as $t) {
+            $types[(string)$t] = (string)(ContentModel::type((string)$t)['plural'] ?? $t);
         }
-        $before = Config::all();
-        Config::save((array)($_POST['cs'] ?? []));
-        // Display settings changed → cached pages must be rebuilt.
-        if ($before !== Config::all() && class_exists(\Slate\PageCache::class)) {
-            \Slate\PageCache::clear();
+        asort($types);
+        $items = [];
+        $rows = DB::all("SELECT p.id, p.title FROM {{comments}} c INNER JOIN {{posts}} p ON p.id = c.post_id WHERE $scope
+            GROUP BY p.id, p.title ORDER BY MAX(c.created_at) DESC LIMIT 200", $sp);
+        foreach ($rows as $r) {
+            $items[(int)$r['id']] = str_limit(trim((string)$r['title']) !== '' ? (string)$r['title'] : '(no title)', 60);
         }
-        log_activity('comments_settings', 'saved');
-        Session::flash('success', 'Comment settings saved.');
-        redirect(admin_url('m/comments-settings'));
+        return ['types' => $types, 'items' => $items];
     }
 }

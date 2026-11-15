@@ -6,14 +6,15 @@ declare(strict_types=1);
 
 use Slate\App;
 use Slate\Auth;
-use Slate\DB;
 use Slate\Hooks;
 use Slate\Modules;
 use Slate\Router;
 use Slate\Session;
 use SlateModules\Forms\Forms;
+use SlateModules\Forms\Inbox;
 
 require_once __DIR__ . '/src/Forms.php';
+require_once __DIR__ . '/src/Inbox.php';
 
 Hooks::add('module_activated_slate-forms', [Forms::class, 'install']);
 
@@ -45,81 +46,53 @@ if (!function_exists('slate_form')) {
 Modules::adminPage('Submissions', 'submissions', static function (): void {
     Forms::install();
     require __DIR__ . '/views/submissions.php';
-}, 'edit_others_posts', 'message', 'content', [Forms::class, 'newCount']);
+}, 'edit_others_posts', 'message', 'main', [Forms::class, 'newCount']);
+
+Modules::settings([
+    ['type' => 'heading', 'label' => 'Email notifications'],
+    ['key' => 'forms_notify_to', 'type' => 'text', 'label' => 'Send new submissions to', 'default' => '', 'placeholder' => 'Admin email (Settings → General)',
+        'help' => 'Comma-separated addresses, used by every form that has no recipients of its own. Empty = the admin email.'],
+    ['type' => 'heading', 'label' => 'Spam protection', 'help' => 'Every form also has a hidden honeypot field that bots fill in; those entries are dropped silently.'],
+    ['key' => 'forms_require_js', 'type' => 'toggle', 'label' => 'Send entries from browsers without JavaScript to Spam', 'default' => true,
+        'help' => 'Most bots do not run JavaScript. These entries are kept under Spam (no email is sent) so you can still review them.'],
+    ['key' => 'forms_rate_limit', 'type' => 'number', 'label' => 'Limit per visitor', 'default' => 15, 'min' => 0, 'max' => 1000, 'suffix' => 'per hour',
+        'help' => 'Maximum submissions from one IP address per hour. 0 = no limit.'],
+    ['key' => 'forms_spam_days', 'type' => 'number', 'label' => 'Delete spam after', 'default' => 0, 'min' => 0, 'max' => 3650, 'suffix' => 'days',
+        'help' => '0 = keep spam until you delete it.'],
+], ['help' => 'Options shared by all forms. Each form’s own fields, messages and recipients are set when you edit the form.']);
+
+Hooks::add('cron_jobs', static fn(array $jobs): array => $jobs + ['forms_spam_cleanup' => ['every' => 86400, 'label' => 'Delete old form spam (Forms settings)', 'run' => [Inbox::class, 'purgeSpam']]]);
 
 Hooks::add('admin_routes', static function (Router $r): void {
     $r->post('/m/submissions/bulk', static function (): void {
         Auth::require('edit_others_posts');
         Forms::install();
-        $ids = array_values(array_filter(array_map('intval', (array)input('ids', []))));
-        $action = (string)input('action', '');
-        if ($ids) {
-            [$in, $params] = DB::in($ids, 'sid');
-            match ($action) {
-                'delete' => DB::query("DELETE FROM {{form_submissions}} WHERE id IN ($in)", $params),
-                'read', 'new', 'spam' => DB::query("UPDATE {{form_submissions}} SET status = :st WHERE id IN ($in)", $params + ['st' => $action]),
-                default => null,
-            };
-            Session::flash('success', count($ids) . ' submission' . (count($ids) === 1 ? '' : 's') . ' updated.');
-            log_activity('submissions_' . preg_replace('/\W/', '', $action), (string)count($ids));
+        $state = null;
+        if (input('all_matching')) {
+            // Every submission matching the list's search, view and filters — not just this page.
+            parse_str((string)input('query'), $get);
+            $saved = $_GET;
+            $_GET = $get;
+            $state = Inbox::table()->state();
+            $_GET = $saved;
         }
-        $to = (string)input('return', '');
-        redirect($to !== '' && str_starts_with($to, admin_url()) ? $to : admin_url('m/submissions'));
+        $n = Inbox::apply((string)input('action', ''), (array)input('ids', []), $state);
+        if ($n) {
+            Session::flash('success', number_format($n) . ' submission' . ($n === 1 ? '' : 's') . (input('action') === 'delete' ? ' deleted.' : ' updated.'));
+        }
+        $to = (string)input('return', '') ?: (string)($_SERVER['HTTP_REFERER'] ?? '');
+        $u = parse_url($to) ?: [];
+        if (isset($u['host']) && $u['host'] === parse_url('//' . ($_SERVER['HTTP_HOST'] ?? ''), PHP_URL_HOST)) {
+            $to = ($u['path'] ?? '') . (isset($u['query']) ? '?' . $u['query'] : ''); // back to the same list page / filters
+        }
+        redirect($to !== '' && str_starts_with($to, admin_url()) ? $to : Inbox::url());
     });
+    // Old export address (?form= &status= &q=), kept for bookmarks. The list's own export button uses ?export=csv.
     $r->get('/m/submissions/export', static function (): void {
         Auth::require('edit_others_posts');
         Forms::install();
-        [$where, $params] = forms_filter_sql();
-        $rows = DB::all("SELECT * FROM {{form_submissions}} $where ORDER BY id DESC LIMIT 50000", $params);
-        $labels = [];
-        $decoded = [];
-        foreach ($rows as $r) {
-            $pairs = Forms::rows($r);
-            $decoded[] = [$r, $pairs];
-            foreach ($pairs as $p) {
-                $labels[$p['label']] = true;
-            }
-        }
-        header('Content-Type: text/csv; charset=utf-8');
-        header('Content-Disposition: attachment; filename="submissions-' . gmdate('Y-m-d') . '.csv"');
-        $out = fopen('php://output', 'w');
-        fwrite($out, "\xEF\xBB\xBF");
-        $cols = array_keys($labels);
-        fputcsv($out, array_merge(['ID', 'Received (UTC)', 'Form', 'Status', 'Page'], $cols, ['IP']));
-        foreach ($decoded as [$r, $pairs]) {
-            $map = array_column($pairs, 'value', 'label');
-            $line = [$r['id'], $r['created_at'], $r['form_title'], $r['status'], $r['page_url']];
-            foreach ($cols as $c) {
-                $v = (string)($map[$c] ?? '');
-                $line[] = preg_match('/^[=+\-@]/', $v) ? "'" . $v : $v; // no spreadsheet formula injection
-            }
-            $line[] = $r['ip'];
-            fputcsv($out, $line);
-        }
-        fclose($out);
-        exit;
+        $q = Inbox::legacyQuery($_GET + ['status' => '']) ?? [];
+        [$where, $params] = Inbox::where(['view' => $q['view'] ?? 'inbox', 'filters' => $q['f'] ?? [], 'q' => $q['q'] ?? '']);
+        Inbox::exportCsv($where, $params);
     });
 });
-
-/** WHERE clause for the inbox filters (?form= &status= &q=). */
-function forms_filter_sql(): array
-{
-    $w = [];
-    $p = [];
-    if (($form = (int)($_GET['form'] ?? 0)) > 0) {
-        $w[] = 'form_id = :form';
-        $p['form'] = $form;
-    }
-    $status = (string)($_GET['status'] ?? '');
-    if (isset(Forms::STATUSES[$status])) {
-        $w[] = 'status = :status';
-        $p['status'] = $status;
-    } elseif ($status !== 'all') {
-        $w[] = "status <> 'spam'";
-    }
-    if (($q = trim((string)($_GET['q'] ?? ''))) !== '') {
-        $w[] = '(data LIKE :q OR page_url LIKE :q2 OR form_title LIKE :q3)';
-        $p['q'] = $p['q2'] = $p['q3'] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
-    }
-    return [$w ? 'WHERE ' . implode(' AND ', $w) : '', $p];
-}

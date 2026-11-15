@@ -3,53 +3,74 @@ declare(strict_types=1);
 
 namespace SlateModules\Multilingual;
 
+use Slate\AdminUi;
 use Slate\Auth;
 use Slate\ContentModel;
+use Slate\Modules;
 use Slate\Options;
 use Slate\PageCache;
 use Slate\Posts;
 use Slate\Router;
 use Slate\Session;
 
-/** Dashboard screen (Multilingual): translations overview, languages, string translations. */
+/**
+ * Dashboard pages (sidebar group "Multilingual"): Overview, Translations, Strings, Languages and Settings.
+ * Form posts go to /m/multilingual/<action> (see routes()).
+ */
 final class Admin
 {
     public const SLUG = 'multilingual';
 
-    public static function url(string $tab = '', array $query = []): string
+    /** page key => [label, capability, icon] ('' = overview, the group's first page). */
+    private const PAGES = [
+        '' => ['Overview', 'edit_posts', 'activity'],
+        'translations' => ['Translations', 'edit_posts', 'translate'],
+        'strings' => ['Strings', 'manage_settings', 'type'],
+        'languages' => ['Languages', 'manage_settings', 'globe'],
+    ];
+
+    /** Register the dashboard pages (module.php). */
+    public static function register(): void
     {
-        if ($tab !== '') {
-            $query = ['tab' => $tab] + $query;
+        foreach (self::PAGES as $key => [$label, $cap, $icon]) {
+            Modules::adminPage($label, self::slug($key), [self::class, $key === '' ? 'overview' : $key], $cap, $icon);
         }
-        $query = array_filter($query, static fn($v) => $v !== null && $v !== '');
-        return admin_url('m/' . self::SLUG) . ($query ? '?' . http_build_query($query) : '');
+        Modules::adminPage('Settings', self::slug('settings'), [self::class, 'settings'], 'manage_settings', 'settings', 'settings');
     }
 
-    public static function tabs(): array
+    private static function slug(string $page): string
     {
-        $tabs = ['translations' => 'Translations'];
-        if (Auth::can('manage_settings')) {
-            $tabs['languages'] = 'Languages';
-            $tabs['strings'] = 'String translations';
-        }
-        return $tabs;
+        return $page === '' ? self::SLUG : self::SLUG . '-' . $page;
     }
 
-    /** Admin page renderer (Modules::adminPage). */
-    public static function render(): void
+    /** Dashboard URL of a page ('' = overview, 'translations', 'strings', 'languages', 'settings'). */
+    public static function url(string $page = '', array $query = []): string
     {
-        $tabs = self::tabs();
-        $tab = (string)($_GET['tab'] ?? '');
-        if (!isset($tabs[$tab])) {
-            $tab = !Languages::isActive() && isset($tabs['languages']) ? 'languages' : 'translations';
+        $query = array_filter($query, static fn($v) => $v !== null && $v !== '' && $v !== []);
+        return admin_url('m/' . self::slug($page)) . ($query ? '?' . http_build_query($query) : '');
+    }
+
+    /** Tabs shared by every page (only the ones the user may open). */
+    public static function nav(string $current): string
+    {
+        $tabs = [];
+        foreach (self::PAGES + ['settings' => ['Settings', 'manage_settings', 'settings']] as $key => [$label, $cap]) {
+            if (Auth::can($cap)) {
+                $tabs[$key === '' ? 'overview' : $key] = [$label, self::url($key)];
+            }
         }
-        $view = static function (string $__name, array $__vars): void {
+        return AdminUi::tabs($tabs, $current);
+    }
+
+    private static function view(string $name, array $vars = []): void
+    {
+        (static function (string $__file, array $__vars): void {
             extract($__vars, EXTR_SKIP);
-            require dirname(__DIR__) . '/views/' . $__name . '.php';
-        };
-        $view('admin', ['tabs' => $tabs, 'tab' => $tab, 'view' => $view]);
+            require $__file;
+        })(dirname(__DIR__) . '/views/' . $name . '.php', $vars);
     }
 
+    /** Form handlers (admin_routes). */
     public static function routes(mixed $r): void
     {
         if (!$r instanceof Router) {
@@ -59,9 +80,106 @@ final class Admin
         $r->post($base . '/languages', [self::class, 'saveLanguages']);
         $r->post($base . '/languages/add', [self::class, 'addLanguage']);
         $r->post($base . '/strings', [self::class, 'saveStrings']);
+        $r->post($base . '/strings/add', [self::class, 'addString']);
+        $r->post($base . '/types', [self::class, 'saveTypes']);
         $r->post($base . '/translate', [self::class, 'translate']);
         $r->post($base . '/link', [self::class, 'link']);
         $r->post($base . '/unlink', [self::class, 'unlink']);
+    }
+
+    // ------------------------------------------------------------------ pages
+
+    public static function overview(): void
+    {
+        // Addresses from before 1.2 (one page with ?tab=).
+        $old = (string)($_GET['tab'] ?? '');
+        if (in_array($old, ['translations', 'strings', 'languages'], true)) {
+            $q = $_GET;
+            unset($q['tab']);
+            redirect(self::url($old, $q));
+        }
+        self::view('overview');
+    }
+
+    public static function translations(): void
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+            self::bulkTranslate();
+        }
+        self::view('translations');
+    }
+
+    public static function strings(): void
+    {
+        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && input('action') === 'delete') {
+            $n = Strings::delete(array_map('strval', (array)input('ids', [])));
+            PageCache::clear();
+            Session::flash('success', $n . ' string' . ($n === 1 ? '' : 's') . ' deleted.');
+            redirect(self::url('strings'));
+        }
+        self::view('strings');
+    }
+
+    public static function languages(): void
+    {
+        self::view('languages');
+    }
+
+    public static function settings(): void
+    {
+        self::view('settings');
+    }
+
+    /**
+     * Translation progress per content type: type => ['items' => groups, 'langs' => [code => groups with that language]].
+     * An "item" is a piece of content together with its translations.
+     */
+    public static function coverage(): array
+    {
+        $out = [];
+        foreach (Languages::translatableTypes() as $type) {
+            $rows = Translations::overview($type)['rows'];
+            $langs = array_fill_keys(array_keys(Languages::all()), 0);
+            foreach ($rows as $row) {
+                foreach ($row as $code => $item) {
+                    if (isset($langs[$code])) {
+                        $langs[$code]++;
+                    }
+                }
+            }
+            $out[$type] = ['items' => count($rows), 'langs' => $langs];
+        }
+        return $out;
+    }
+
+    /** Bulk action of the Translations list: create_<lang> makes draft translations of the selected items. */
+    private static function bulkTranslate(): void
+    {
+        $action = (string)input('action', '');
+        $lang = str_starts_with($action, 'create_') ? substr($action, 7) : '';
+        $back = self::back();
+        if ($lang === '' || Languages::get($lang) === null) {
+            redirect($back);
+        }
+        $made = $had = 0;
+        $errors = [];
+        foreach (array_slice(array_unique(array_map('intval', (array)input('ids', []))), 0, 200) as $id) {
+            $res = Translations::create($id, $lang);
+            if (!$res['ok']) {
+                $errors[$res['error'] ?? 'Error'] = true;
+            } elseif (!empty($res['existed'])) {
+                $had++;
+            } else {
+                $made++;
+            }
+        }
+        $native = Languages::native($lang);
+        Session::flash('success', $made . ' ' . $native . ' draft' . ($made === 1 ? '' : 's') . ' created'
+            . ($had ? ' (' . $had . ' already existed)' : '') . '.' . ($made ? ' Open each one to translate it, then publish.' : ''));
+        if ($errors) {
+            Session::flash('error', implode(' ', array_keys($errors)));
+        }
+        redirect($back);
     }
 
     // ------------------------------------------------------------------ languages
@@ -101,18 +219,26 @@ final class Admin
             ];
         }
         $errors = array_merge($errors, self::validatePrefixes($langs, $default));
-        $types = $current['types'];
-        if (input('types_present') !== null) {
-            $public = array_keys(array_filter(ContentModel::types(), static fn($t) => !empty($t['public'])));
-            $types = array_values(array_intersect($public, array_map('strval', (array)input('types', []))));
+        // Order: "move" = "<code>:up" / "<code>:down" (the default language always comes first).
+        [$moveCode, $moveDir] = array_pad(explode(':', (string)input('move', ''), 2), 2, '');
+        if (isset($langs[$moveCode])) {
+            $keys = array_keys($langs);
+            $i = array_search($moveCode, $keys, true);
+            $j = $moveDir === 'up' ? $i - 1 : $i + 1;
+            if (isset($keys[$j])) {
+                [$keys[$i], $keys[$j]] = [$keys[$j], $keys[$i]];
+                $langs = array_replace(array_flip($keys), $langs);
+            }
         }
+        $types = $current['types'];
         if ($errors) {
             Session::flash('error', implode(' ', $errors));
             redirect(self::url('languages'));
         }
         $changedDefault = $default !== $current['default'];
         self::store(['default' => $default, 'languages' => $langs, 'types' => $types]);
-        $msg = $remove !== '' && !isset($langs[$remove]) ? 'Language removed. Its content was kept and now counts as ' . Languages::native($default) . ' until you assign another language.' : 'Languages saved.';
+        $msg = $remove !== '' && !isset($langs[$remove]) ? 'Language removed. Its content was kept and now counts as ' . Languages::native($default) . ' until you assign another language.'
+            : (isset($langs[$moveCode]) ? 'Order saved.' : 'Languages saved.');
         Session::flash('success', $msg);
         if ($changedDefault) {
             Session::flash('warn', 'The default language is now ' . Languages::native($default) . ': items without a language belong to it and its URLs have no prefix.');
@@ -203,21 +329,50 @@ final class Admin
 
     // ------------------------------------------------------------------ strings
 
+    /** Save the translations typed in the Strings list (only the rows shown on that page). */
     public static function saveStrings(): void
     {
         Auth::require('manage_settings');
-        $rows = (array)input('rows', []);
-        // PHP drops fields beyond max_input_vars: never save a cut-off form (it would delete strings).
+        $back = self::back('strings');
+        // PHP drops fields beyond max_input_vars: never save a cut-off form.
         if (input('complete') !== '1') {
             Session::flash('error', 'The form was too large for this server (PHP max_input_vars = ' . (int)ini_get('max_input_vars')
-                . '), so nothing was saved. Raise that limit or ask your host to.');
-            redirect(self::url('strings'));
+                . '), so nothing was saved. Show fewer rows per page and try again.');
+            redirect($back);
         }
-        $n = Strings::save($rows);
+        $n = Strings::update((array)input('tr', []));
         PageCache::clear();
         log_activity('settings_saved', 'multilingual strings');
         Session::flash('success', $n . ' string' . ($n === 1 ? '' : 's') . ' saved.');
+        redirect($back);
+    }
+
+    public static function addString(): void
+    {
+        Auth::require('manage_settings');
+        $source = trim((string)input('source', ''));
+        if (!Strings::add($source, (array)input('tr', []))) {
+            Session::flash('error', $source === '' ? 'Type the original text first.' : 'You have reached the limit of ' . Strings::MAX . ' strings.');
+            redirect(self::url('strings'));
+        }
+        PageCache::clear();
+        log_activity('settings_saved', 'multilingual strings');
+        Session::flash('success', '“' . mb_strimwidth($source, 0, 60, '…') . '” saved.');
         redirect(self::url('strings'));
+    }
+
+    // ------------------------------------------------------------------ settings
+
+    /** Settings page: which content types are translatable. */
+    public static function saveTypes(): void
+    {
+        Auth::require('manage_settings');
+        $current = Languages::settings();
+        $public = array_keys(array_filter(ContentModel::types(), static fn($t) => !empty($t['public'])));
+        $types = array_values(array_intersect($public, array_map('strval', (array)input('types', []))));
+        self::store(['default' => $current['default'], 'languages' => $current['languages'], 'types' => $types]);
+        Session::flash('success', 'Settings saved.');
+        redirect(self::url('settings'));
     }
 
     // ------------------------------------------------------------------ translations
@@ -261,10 +416,10 @@ final class Admin
         redirect(self::back());
     }
 
-    /** Return address posted by the forms (only this screen). */
-    private static function back(): string
+    /** Return address posted by the forms (only this module's pages). */
+    private static function back(string $page = 'translations'): string
     {
         $to = (string)input('return', '');
-        return $to !== '' && str_starts_with($to, admin_url('m/' . self::SLUG)) ? $to : self::url('translations');
+        return $to !== '' && str_starts_with($to, admin_url('m/' . self::SLUG)) && !preg_match('/[\r\n]/', $to) ? $to : self::url($page);
     }
 }

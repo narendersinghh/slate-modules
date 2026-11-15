@@ -9,4 +9,6 @@ use Slate\DB;
 use Slate\Options;
 
 DB::exec('DROP TABLE IF EXISTS {{comments}}');
-Options::delete('comments_settings');
+foreach (['settings', 'types', 'auto_append', 'moderate', 'approve_known', 'close_days', 'max_links', 'blocked_words', 'notify_email', 'order', 'api_count'] as $k) {
+    Options::delete('comments_' . $k);
+}

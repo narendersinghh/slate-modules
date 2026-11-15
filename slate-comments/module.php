@@ -10,6 +10,7 @@ use Slate\Modules;
 use Slate\Router;
 use SlateModules\Comments\Admin;
 use SlateModules\Comments\Comments;
+use SlateModules\Comments\Config;
 use SlateModules\Comments\Front;
 use SlateModules\Comments\Install;
 use SlateModules\Comments\Rest;
@@ -41,16 +42,13 @@ Hooks::add('api_post', [Rest::class, 'filterPost']);
 Hooks::add('api_routes', [Rest::class, 'routes']);
 
 // ---------------------------------------------------------------- admin
+// Moderation list (Modules → Comments); the edit screen is the same page with ?edit=<id>.
 Modules::adminPage('Comments', 'comments', static function (): void {
     if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         Admin::handlePost();
     }
     require __DIR__ . '/views/admin.php';
-}, 'edit_posts', 'message', 'content', [Comments::class, 'pendingCount']);
+}, 'edit_posts', 'message', 'main', [Comments::class, 'pendingCount']);
 
-Modules::adminPage('Comment settings', 'comments-settings', static function (): void {
-    if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
-        Admin::saveSettings();
-    }
-    require __DIR__ . '/views/settings.php';
-}, 'manage_settings', 'settings', 'build');
+// Settings → Modules → Comments
+Config::register();

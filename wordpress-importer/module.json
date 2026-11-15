@@ -1,11 +1,12 @@
 {
   "name": "Site Migration",
   "slug": "wordpress-importer",
+  "icon": "download",
   "description": "Move an existing website to Slate: content, post types, taxonomies, custom fields, media (auto-optimized), SEO, menus, settings and URLs with automatic redirects, plus an exact mirror of the design. Also keeps old links, asset URLs and form endpoints of the previous site working.",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "author": "Slate",
   "homepage": "https://github.com/narendersinghh/slate-modules",
-  "requires": "0.1.0",
+  "requires": "0.13.0",
   "depends": {
     "auto-cpt-generator": ">=1.0"
   },

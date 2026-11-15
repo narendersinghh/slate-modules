@@ -7,12 +7,12 @@ declare(strict_types=1);
 use Slate\Hooks;
 use Slate\Modules;
 use Slate\Options;
-use Slate\Router;
 use SlateModules\Shop\Admin;
 use SlateModules\Shop\Cart;
 use SlateModules\Shop\Checkout;
 use SlateModules\Shop\Orders;
 use SlateModules\Shop\Product;
+use SlateModules\Shop\Settings;
 use SlateModules\Shop\Shop;
 
 // Classes are autoloaded through module.json; this fallback keeps the module working if the autoload map is stale.
@@ -26,7 +26,7 @@ spl_autoload_register(static function (string $class): void {
     }
 });
 
-Options::lazy(Shop::SECRETS);
+Options::lazy(Shop::LEGACY_SECRETS); // pre-1.2 storage, read until migration 002 has run
 
 // ---------------------------------------------------------------- lifecycle
 Hooks::add('module_activated_slate-shop', [Shop::class, 'ensureCacheBypass']);
@@ -136,15 +136,9 @@ Hooks::add('cron_jobs', static fn(array $jobs): array => $jobs + [
 ]);
 
 // ---------------------------------------------------------------- admin
-Modules::adminPage('Orders', Admin::ORDERS, static function (): void {
-    echo Shop::view(isset($_GET['id']) ? 'admin/order' : 'admin/orders');
-}, 'edit_others_posts', 'shopping', 'content', [Orders::class, 'newCount']);
-
-Modules::adminPage('Shop settings', Admin::SETTINGS, static function (): void {
-    echo Shop::view('admin/settings');
-}, 'manage_settings', 'settings', 'build');
-
-Hooks::add('admin_routes', static function (Router $r): void {
-    $r->post('/m/' . Admin::ORDERS . '/action', [Admin::class, 'orderAction']);
-    $r->post('/m/' . Admin::SETTINGS . '/save', [Admin::class, 'saveSettings']);
-});
+Modules::adminPage('Orders', Admin::ORDERS, [Admin::class, 'ordersPage'], Admin::CAP, 'shopping', 'main', [Orders::class, 'newCount']);
+Modules::adminPage('Order', Admin::ORDER, [Admin::class, 'orderPage'], Admin::CAP, 'shopping', 'hidden');
+Modules::settings(Settings::fields(), ['help' => 'Currency, checkout, payment methods and order emails.', 'render' => [Settings::class, 'panel']]);
+Hooks::add('settings_saved', [Settings::class, 'saved']);
+// The settings page before 1.2 (bookmarks, older docs).
+Modules::adminPage('Shop settings', 'shop-settings', static fn() => redirect(Slate\AdminUi::settingsUrl(Admin::MODULE)), 'manage_settings', 'settings', 'hidden');

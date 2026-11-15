@@ -6,8 +6,8 @@
       "slug": "slate-forms",
       "name": "Forms",
       "description": "Build forms in the dashboard (Content → Forms), place them anywhere with the Form widget in the editor, a Form custom field, the {{form:slug}} template tag or [form slug=\"…\"], and manage every submission in one inbox with email notifications, spam filtering and CSV export.",
-      "version": "1.2.0",
-      "requires": "0.3.0",
+      "version": "1.3.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-forms",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-forms",
@@ -15,28 +15,30 @@
         "forms",
         "leads",
         "email"
-      ]
+      ],
+      "icon": "message"
     },
     {
       "slug": "wordpress-importer",
       "name": "Site Migration",
       "description": "Move an existing website to Slate: content, post types, taxonomies, custom fields, media (auto-optimized), SEO, menus, settings and URLs with automatic redirects, plus an exact mirror of the design. Also keeps old links, asset URLs and form endpoints of the previous site working.",
-      "version": "1.2.0",
-      "requires": "0.1.0",
+      "version": "1.3.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/wordpress-importer",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/wordpress-importer",
       "tags": [
         "migration",
         "wordpress"
-      ]
+      ],
+      "icon": "download"
     },
     {
       "slug": "auto-cpt-generator",
       "name": "Auto CPT Generator",
       "description": "Automatically create post types, taxonomies and custom fields — from a live WordPress site, a WordPress export file, a plain-English description (AI) or a JSON spec.",
-      "version": "1.0.0",
-      "requires": "0.1.0",
+      "version": "1.1.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/auto-cpt-generator",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/auto-cpt-generator",
@@ -44,14 +46,15 @@
         "content model",
         "migration",
         "ai"
-      ]
+      ],
+      "icon": "sparkles"
     },
     {
       "slug": "slate-comments",
       "name": "Comments",
       "description": "Privacy-friendly comments for posts and any content type: threaded replies, moderation queue, spam protection that works with the page cache (no cookies, no third parties), email notifications, webhooks and REST API output.",
-      "version": "1.0.0",
-      "requires": "0.10.0",
+      "version": "1.1.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-comments",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-comments",
@@ -60,14 +63,15 @@
         "community",
         "moderation",
         "engagement"
-      ]
+      ],
+      "icon": "message"
     },
     {
       "slug": "slate-multilingual",
       "name": "Multilingual",
       "description": "Publish your website in several languages: a language for every item, linked translations created in one click, language URLs (/es/…), automatic hreflang, html lang and social locale, per-language listings and search, a language switcher ({{languages}}), translated template strings ({{t:…}}) and language-aware REST API output.",
-      "version": "1.1.0",
-      "requires": "0.12.0",
+      "version": "1.2.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-multilingual",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-multilingual",
@@ -76,21 +80,23 @@
         "translation",
         "i18n",
         "seo"
-      ]
+      ],
+      "icon": "translate"
     },
     {
       "slug": "slate-shop",
       "name": "Shop",
       "description": "Products, a cart, checkout and orders: sell physical or digital goods with Stripe Checkout, Razorpay or manual payment (bank transfer / cash on delivery). Template tags for prices and add-to-cart buttons, an Orders inbox and email notifications.",
-      "version": "1.1.0",
-      "requires": "0.12.0",
+      "version": "1.2.0",
+      "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-shop",
       "download": "https://github.com/narendersinghh/slate-modules/tree/main/slate-shop",
       "tags": [
         "ecommerce",
         "payments"
-      ]
+      ],
+      "icon": "shopping"
     }
   ]
 }

@@ -2,13 +2,13 @@
   "name": "Shop",
   "slug": "slate-shop",
   "description": "Products, a cart, checkout and orders: sell physical or digital goods with Stripe Checkout, Razorpay or manual payment (bank transfer / cash on delivery). Template tags for prices and add-to-cart buttons, an Orders inbox and email notifications.",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "author": "Slate",
   "homepage": "https://github.com/narendersinghh/slate-modules",
-  "requires": "0.12.0",
+  "requires": "0.13.0",
   "requires_php": "8.2",
   "autoload": { "SlateModules\\Shop\\": "src/" },
   "source": "https://github.com/narendersinghh/slate-modules/tree/main/slate-shop",
-  "settings": "shop-settings",
+  "icon": "shopping",
   "tags": ["ecommerce", "payments"]
 }

@@ -11,7 +11,6 @@ declare(strict_types=1);
 use Slate\DB;
 use Slate\Frontend;
 use Slate\Hooks;
-use Slate\Modules;
 use Slate\Options;
 use Slate\PageCache;
 use SlateModules\Multilingual\Admin;
@@ -76,7 +75,7 @@ if (DB::connected() && Languages::isActive()) {
 }
 
 // ---------------------------------------------------------------- admin
-Modules::adminPage('Multilingual', Admin::SLUG, [Admin::class, 'render'], 'edit_posts', 'globe', 'content');
+Admin::register();
 Hooks::add('admin_routes', [Admin::class, 'routes']);
 
 Hooks::add('module_activated_slate-multilingual', static function (): void {
@@ -102,7 +101,7 @@ if (!function_exists('ml_lang')) {
 }
 
 if (!function_exists('ml_t')) {
-    /** A fixed text in the visitor's language (Multilingual → String translations). Not escaped: use e(ml_t('…')). */
+    /** A fixed text in the visitor's language (Multilingual → Strings). Not escaped: use e(ml_t('…')). */
     function ml_t(string $text): string
     {
         return Strings::translate($text);

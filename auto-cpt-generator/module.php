@@ -5,7 +5,7 @@
 declare(strict_types=1);
 
 use Slate\Auth;
-use Slate\Csrf;
+use Slate\ContentModel;
 use Slate\Hooks;
 use Slate\Modules;
 use Slate\Router;
@@ -66,8 +66,31 @@ Hooks::add('admin_routes', static function (Router $r): void {
                 throw new RuntimeException('Invalid spec JSON.');
             }
             $log = Generator::apply($spec);
-            log_activity('auto_cpt_applied', count($log) . ' changes');
-            return ['log' => $log];
+            // Links to what now exists, and a readable history entry ("2 post types, 1 taxonomy · WordPress export").
+            $spec = Generator::normalize($spec);
+            $links = [];
+            foreach ($spec['post_types'] as $t) {
+                if (($type = ContentModel::type($t['slug'])) && empty($type['builtin'])) {
+                    $links[] = ['label' => (string)$type['plural'], 'url' => admin_url('content/' . $t['slug'])];
+                }
+            }
+            foreach ($spec['taxonomies'] as $x) {
+                if ($tax = ContentModel::taxonomy($x['slug'])) {
+                    $links[] = ['label' => (string)$tax['plural'], 'url' => admin_url('model/taxonomies/' . $x['slug'])];
+                }
+            }
+            if ($spec['field_groups']) {
+                $links[] = ['label' => 'Field groups', 'url' => admin_url('model/fields')];
+            }
+            $plural = static fn(int $n, string $one, string $many): string => $n . ' ' . ($n === 1 ? $one : $many);
+            $source = ['wp' => 'WordPress site', 'wxr' => 'WordPress export', 'ai' => 'AI description', 'json' => 'JSON'][(string)(json_input()['source'] ?? '')] ?? '';
+            $summary = implode(', ', array_filter([
+                $spec['post_types'] ? $plural(count($spec['post_types']), 'post type', 'post types') : '',
+                $spec['taxonomies'] ? $plural(count($spec['taxonomies']), 'taxonomy', 'taxonomies') : '',
+                $spec['field_groups'] ? $plural(count($spec['field_groups']), 'field group', 'field groups') : '',
+            ])) ?: 'No changes';
+            log_activity('auto_cpt_applied', $summary . ($source !== '' ? ' · ' . $source : ''));
+            return ['log' => $log, 'links' => $links];
         });
     });
 });

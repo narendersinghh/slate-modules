@@ -16,10 +16,12 @@ use Slate\Theme;
 /** Settings, content model, URLs and page rendering shared by the rest of the Shop. */
 final class Shop
 {
-    public const SETTINGS = 'shop_settings';
-    public const SECRETS = 'shop_secrets';
+    /** Before 1.2 all settings lived in one array option and the secrets in another; read as a fallback until migrated. */
+    public const LEGACY_SETTINGS = 'shop_settings';
+    public const LEGACY_SECRETS = 'shop_secrets';
     public const BYPASS_COOKIE = 'shop_*';
 
+    /** Setting => default. Each is stored in its own option, "shop_<setting>" (see optionKey()). */
     public const DEFAULTS = [
         'currency' => 'USD', 'currency_symbol' => '$', 'currency_position' => 'before', 'decimals' => 2,
         'thousand_sep' => ',', 'decimal_sep' => '.',
@@ -38,33 +40,60 @@ final class Shop
         'add_to_cart_label' => 'Add to cart', 'order_button_label' => 'Place order',
     ];
 
-    /** Encrypted secrets (stored in a separate, non-autoloaded option). */
+    /** Labels and button texts that fall back to their default when left empty. */
+    private const NOT_EMPTY = ['manual_title', 'stripe_title', 'razorpay_title', 'cart_title', 'checkout_title', 'add_to_cart_label', 'order_button_label'];
+
+    /** Secrets, stored encrypted with Crypto (the same way core stores "secret" settings), each in "shop_<key>". */
     public const SECRET_KEYS = [
-        'stripe_test_secret' => 'Stripe test secret key (sk_test_…)',
-        'stripe_test_webhook' => 'Stripe test webhook signing secret (whsec_…)',
-        'stripe_live_secret' => 'Stripe live secret key (sk_live_…)',
-        'stripe_live_webhook' => 'Stripe live webhook signing secret (whsec_…)',
-        'razorpay_test_key_secret' => 'Razorpay test key secret',
-        'razorpay_test_webhook' => 'Razorpay test webhook secret',
-        'razorpay_live_key_secret' => 'Razorpay live key secret',
-        'razorpay_live_webhook' => 'Razorpay live webhook secret',
+        'stripe_test_secret' => 'Test secret key',
+        'stripe_test_webhook' => 'Test webhook signing secret',
+        'stripe_live_secret' => 'Live secret key',
+        'stripe_live_webhook' => 'Live webhook signing secret',
+        'razorpay_test_key_secret' => 'Test key secret',
+        'razorpay_test_webhook' => 'Test webhook secret',
+        'razorpay_live_key_secret' => 'Live key secret',
+        'razorpay_live_webhook' => 'Live webhook secret',
     ];
+
+    /** Marks "option not stored" (Options::get() returns the default we pass). */
+    private const UNSET = "\0unset";
 
     /** True while a shop page (cart, checkout, order) is rendered. */
     public static bool $shopPage = false;
 
     private static ?array $settings = null;
-    private static ?array $secrets = null;
+    private static ?array $legacy = null;
+    private static ?array $legacySecrets = null;
 
     // ------------------------------------------------------------------ settings
 
+    /** Option name of a setting or secret: "currency" → "shop_currency" ("shop_email" stays "shop_email"). */
+    public static function optionKey(string $key): string
+    {
+        return str_starts_with($key, 'shop_') ? $key : 'shop_' . $key;
+    }
+
     public static function settings(): array
     {
-        if (self::$settings === null) {
-            $stored = Options::get(self::SETTINGS, []);
-            self::$settings = (is_array($stored) ? $stored : []) + self::DEFAULTS;
+        if (self::$settings !== null) {
+            return self::$settings;
         }
-        return self::$settings;
+        $out = [];
+        foreach (self::DEFAULTS as $k => $default) {
+            $v = Options::get(self::optionKey($k), self::UNSET);
+            if ($v === self::UNSET) {
+                $v = self::legacy()[$k] ?? $default;
+            }
+            if (in_array($k, self::NOT_EMPTY, true) && trim((string)$v) === '') {
+                $v = $default;
+            }
+            $out[$k] = match (true) {
+                is_bool($default) => (bool)$v,
+                is_int($default) => (int)$v,
+                default => is_scalar($v) ? (string)$v : (string)$default,
+            };
+        }
+        return self::$settings = $out;
     }
 
     public static function setting(string $key): mixed
@@ -72,48 +101,39 @@ final class Shop
         return self::settings()[$key] ?? null;
     }
 
-    public static function saveSettings(array $settings): void
+    /** Settings saved before 1.2 (one array option); empty once the 002 migration ran. */
+    private static function legacy(): array
     {
-        $clean = array_intersect_key($settings, self::DEFAULTS);
-        Options::set(self::SETTINGS, $clean);
-        self::$settings = null;
+        if (self::$legacy === null) {
+            $v = Options::get(self::LEGACY_SETTINGS, []);
+            self::$legacy = is_array($v) ? $v : [];
+        }
+        return self::$legacy;
     }
 
     public static function secret(string $key): string
     {
-        if (self::$secrets === null) {
-            $stored = Options::get(self::SECRETS, []);
-            self::$secrets = is_array($stored) ? $stored : [];
+        if (!isset(self::SECRET_KEYS[$key])) {
+            return '';
+        }
+        $stored = Options::get(self::optionKey($key), self::UNSET);
+        if ($stored === self::UNSET) {
+            if (self::$legacySecrets === null) {
+                $v = Options::get(self::LEGACY_SECRETS, []);
+                self::$legacySecrets = is_array($v) ? $v : [];
+            }
+            $stored = self::$legacySecrets[$key] ?? '';
         }
         try {
-            return trim(Crypto::decrypt((string)(self::$secrets[$key] ?? '')));
+            return trim(Crypto::decrypt((string)$stored));
         } catch (\Throwable) {
             return '';
         }
     }
 
-    public static function hasSecret(string $key): bool
+    public static function flush(): void
     {
-        return self::secret($key) !== '';
-    }
-
-    /** @param array<string, string|null> $changes plain values; '' or null removes a secret */
-    public static function saveSecrets(array $changes): void
-    {
-        $stored = Options::get(self::SECRETS, []);
-        $stored = is_array($stored) ? $stored : [];
-        foreach ($changes as $key => $plain) {
-            if (!isset(self::SECRET_KEYS[$key])) {
-                continue;
-            }
-            if ($plain === null || $plain === '') {
-                unset($stored[$key]);
-            } else {
-                $stored[$key] = Crypto::encrypt($plain);
-            }
-        }
-        Options::set(self::SECRETS, $stored, false);
-        self::$secrets = null;
+        self::$settings = self::$legacy = self::$legacySecrets = null;
     }
 
     /** Payment methods offered at checkout: slug => label. */
