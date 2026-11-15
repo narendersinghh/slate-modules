@@ -6,15 +6,10 @@ namespace SlateModules\Multilingual;
 use Slate\App;
 use Slate\Auth;
 use Slate\Frontend;
-use Slate\Hooks;
-use Slate\Menus;
 use Slate\Options;
-use Slate\PageCache;
 use Slate\Posts;
 use Slate\Router;
 use Slate\Seo;
-use Slate\Templates;
-use Slate\Theme;
 
 /**
  * Language-prefixed URLs and everything visitors see: routing, permalinks, redirects, <html lang>, hreflang,
@@ -45,6 +40,12 @@ final class Urls
 
     /** Render the language home as a post listing (static front page without a translation). */
     private static bool $homeListing = false;
+
+    /** The request is a sitemap: core builds it while "resolving", but its URLs are for visitors (prefixed). */
+    private static bool $sitemap = false;
+
+    /** Re-entry guard for route_resolved (Frontend::notFound() renders, and so fires it again). */
+    private static bool $guarding = false;
 
     /** Language of the current request: front end, then API ?lang=, then the default language. */
     public static function current(): string
@@ -77,6 +78,7 @@ final class Urls
                 $rest = $candidate;
             }
         }
+        self::$sitemap = (bool)preg_match('#^/sitemap[^/]*\.xml$#', $rest);
         self::$lang = $lang;
         self::$path = $rest;
         self::$routed = $lang === Languages::default() ? $rest : self::mapTranslatedPages($rest, $lang);
@@ -139,7 +141,7 @@ final class Urls
         $r->get('/page/{n:\d+}', $handler);
     }
 
-    /** Mirrors core's posts home (Frontend::handle) for a language without its own front page. */
+    /** The posts home (like core's "/" without a static front page) for a language without its own front page. */
     private static function renderHome(int $page): void
     {
         $requestPath = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
@@ -152,26 +154,8 @@ final class Urls
         }
         Posts::publishScheduled();
         $result = Posts::query(['type' => 'post', 'page' => $page, 'with_terms' => true]);
-        $title = (string)Options::get('site_title');
         Seo::$ctx = ['kind' => 'home', 'page' => $page];
-        $vars = ['result' => $result, 'title' => $title];
-        Frontend::$data = array_merge(Frontend::$data, $vars, ['kind' => 'home']);
-        $tpl = Theme::active() !== '' ? Templates::resolve('archive', 'post') : null;
-        if ($tpl) {
-            $html = Templates::renderPage($tpl, ['post' => null, 'result' => $result, 'term' => null,
-                'archive' => ['title' => $title, 'description' => '', 'count' => $result['total']], 'kind' => 'home', 'page' => (int)$result['page']]);
-        } else {
-            ob_start();
-            Theme::render(['home', 'index'], $vars);
-            $html = (string)ob_get_clean();
-        }
-        if (Options::get('html_minify', true)) {
-            $html = Frontend::minify($html);
-        }
-        $html = (string)Hooks::filter('html_output', $html);
-        header('Content-Type: text/html; charset=utf-8');
-        echo $html;
-        PageCache::store($html);
+        Frontend::page('home', ['result' => $result, 'title' => (string)Options::get('site_title')], ['home', 'index']);
     }
 
     // ------------------------------------------------------------------ links
@@ -184,21 +168,12 @@ final class Urls
             return $path;
         }
         if (self::$frontend) {
-            $caller = self::caller();
-            $class = (string)($caller['class'] ?? '');
             // Core resolves the (already unprefixed) request path by comparing it with permalinks.
-            if ($class === Frontend::class && in_array($caller['function'] ?? '', ['handle', 'matchPostStructure'], true)) {
+            if (Frontend::resolving() && !self::$sitemap) {
                 return $path;
             }
-            // Menus follow the visitor's language when the linked item has a published translation.
-            $lang = self::current();
-            if ($class === Menus::class && $lang !== Languages::default() && !empty($post['id'])) {
-                $t = Translations::translation($post, $lang, true);
-                if ($t && (int)$t['id'] !== (int)$post['id']) {
-                    return self::pathOf($t);
-                }
-            }
         }
+
         $lang = Translations::lang($post);
         if ($lang === Languages::default()) {
             return $path;
@@ -209,10 +184,29 @@ final class Urls
         return self::prefixPath($path, $lang);
     }
 
+    /** menu_item: menu links to content follow the visitor's language when a published translation exists. */
+    public static function menuItem(mixed $item, mixed $post = null, mixed $term = null): mixed
+    {
+        if (!is_array($item) || !is_array($post) || empty($post['id']) || !self::$frontend || !Languages::isActive()
+            || ($lang = self::current()) === Languages::default()) {
+            return $item;
+        }
+        $t = Translations::translation($post, $lang, true);
+        if (!$t || (int)$t['id'] === (int)$post['id']) {
+            return $item;
+        }
+        $item['url'] = Posts::permalink($t);
+        if (($item['label'] ?? '') === (string)$post['title']) {
+            $item['label'] = (string)$t['title']; // automatic label (the item's title) → the translation's title
+        }
+        return $item;
+    }
+
     /** term_link: term archives stay in the visitor's language. */
     public static function termLink(mixed $path, mixed $term = null): mixed
     {
-        if (!is_string($path) || !self::$frontend || !Languages::isActive() || self::current() === Languages::default()) {
+        if (!is_string($path) || !self::$frontend || !Languages::isActive() || self::current() === Languages::default()
+            || (Frontend::resolving() && !self::$sitemap)) {
             return $path;
         }
         return self::prefixPath($path, self::current());
@@ -271,38 +265,42 @@ final class Urls
 
     // ------------------------------------------------------------------ output
 
-    /** html_output: wrong-language redirects for single items, then <html lang/dir> for translated pages. */
-    public static function htmlOutput(mixed $html): mixed
+    /** html_lang: <html lang> of translated pages (default-language pages keep the site setting). */
+    public static function htmlLang(mixed $code): mixed
     {
-        if (!is_string($html) || !self::$frontend || !Languages::isActive()) {
-            return $html;
+        if (!self::$frontend || !Languages::isActive() || ($lang = self::current()) === Languages::default()) {
+            return $code;
         }
-        self::guardSingle();
-        $lang = self::current();
-        if ($lang === Languages::default()) {
-            return $html;
-        }
-        $attrs = ' lang="' . e(Languages::htmlLang($lang)) . '" dir="' . e(Languages::dir($lang)) . '"';
-        return (string)preg_replace_callback('/<html\b([^>]*)>/i', static function (array $m) use ($attrs): string {
-            $rest = (string)preg_replace('/\s(?:lang|dir)\s*=\s*(?:"[^"]*"|\'[^\']*\'|[^\s>]+)/i', '', $m[1]);
-            return '<html' . $attrs . $rest . '>';
-        }, $html, 1);
+        return Languages::htmlLang($lang);
     }
 
-    /** A single item requested under another language's prefix → 301 to its own address. Disabled languages → 404. */
-    private static function guardSingle(): void
+    /** html_dir: text direction of translated pages. */
+    public static function htmlDir(mixed $dir): mixed
     {
-        $c = Seo::$ctx;
-        if (($c['kind'] ?? '') !== 'single' || !is_array($c['post'] ?? null) || isset($_GET['preview'])
+        if (!self::$frontend || !Languages::isActive() || ($lang = self::current()) === Languages::default()) {
+            return $dir;
+        }
+        return Languages::dir($lang);
+    }
+
+    /**
+     * route_resolved: a single item requested under another language's prefix → 301 to its own address;
+     * items in a disabled language → 404.
+     */
+    public static function routeResolved(mixed $kind = '', mixed $vars = []): void
+    {
+        if (self::$guarding || !self::$frontend || !Languages::isActive() || $kind !== 'single' || !is_array($vars)
+            || !is_array($vars['post'] ?? null) || isset($_GET['preview'])
             || !in_array($_SERVER['REQUEST_METHOD'] ?? 'GET', ['GET', 'HEAD'], true)) {
             return;
         }
-        $post = $c['post'];
+        $post = $vars['post'];
         if (!Languages::isTranslatable((string)($post['type'] ?? ''))) {
             return;
         }
         $lang = Translations::lang($post);
         if (!Languages::isEnabled($lang)) {
+            self::$guarding = true;
             Frontend::notFound();
             exit;
         }
@@ -313,6 +311,21 @@ final class Urls
         if ($wrong) {
             redirect(Posts::permalink($post) . self::queryString(), 301);
         }
+    }
+
+    /** frontend_vars: a translated posts page lists under its own title. */
+    public static function frontendVars(mixed $vars, mixed $kind = ''): mixed
+    {
+        if (!is_array($vars) || $kind !== 'archive' || !self::$frontend || !Languages::isActive()
+            || ($lang = self::current()) === Languages::default() || !($p = self::postsPageMatch())) {
+            return $vars;
+        }
+        $t = Translations::translation($p, $lang, true);
+        if ($t && (string)$t['title'] !== '') {
+            $vars['title'] = (string)$t['title'];
+            Seo::$ctx['title'] = (string)$t['title'];
+        }
+        return $vars;
     }
 
     /**
@@ -407,17 +420,6 @@ final class Urls
         return $head . "\n" . implode("\n", $extra);
     }
 
-    /** seo_title: a translated posts page lists under its own title. */
-    public static function seoTitle(mixed $title, mixed $c = null): mixed
-    {
-        if (!is_string($title) || !self::$frontend || !Languages::isActive() || ($lang = self::current()) === Languages::default()
-            || (Seo::$ctx['kind'] ?? '') !== 'archive' || !($p = self::postsPageMatch())) {
-            return $title;
-        }
-        $t = Translations::translation($p, $lang, true);
-        return $t && (string)$p['title'] !== '' && (string)$t['title'] !== '' ? str_replace((string)$p['title'], (string)$t['title'], $title) : $title;
-    }
-
     /** seo_schema: inLanguage and the page URL of translated pages. */
     public static function seoSchema(mixed $graph, mixed $c = null): mixed
     {
@@ -457,6 +459,63 @@ final class Urls
             return 'listing';
         }
         return $kind;
+    }
+
+    // ------------------------------------------------------------------ sitemaps
+
+    /** sitemap_posts: leave out items in disabled languages; load their translation groups in a few queries. */
+    public static function sitemapPosts(mixed $rows, mixed $type = '', mixed $page = 1): mixed
+    {
+        if (!is_array($rows) || !Languages::isActive() || !Languages::isTranslatable((string)$type)) {
+            return $rows;
+        }
+        $rows = array_values(array_filter($rows, static fn($r) => !is_array($r) || Languages::isEnabled(Translations::lang($r))));
+        Translations::primeGroups((string)$type, array_map(static fn($r) => Translations::group($r), array_filter($rows, 'is_array')));
+        return $rows;
+    }
+
+    /** sitemap_urlset: declare the xhtml namespace used by hreflang links. */
+    public static function sitemapUrlset(mixed $tag): mixed
+    {
+        if (!is_string($tag) || !Languages::isActive() || str_contains($tag, 'xmlns:xhtml=')) {
+            return $tag;
+        }
+        return (string)preg_replace('/>\s*$/', ' xmlns:xhtml="http://www.w3.org/1999/xhtml">', $tag, 1);
+    }
+
+    /** sitemap_entry: <xhtml:link rel="alternate" hreflang> for every published translation (enabled languages). */
+    public static function sitemapEntry(mixed $lines, mixed $post = null): mixed
+    {
+        if (!is_array($lines) || !$lines || !is_array($post) || !Languages::isActive()
+            || !Languages::isTranslatable((string)($post['type'] ?? '')) || Translations::group($post) === '') {
+            return $lines;
+        }
+        $map = Translations::map($post, true);
+        $links = [];
+        foreach (Languages::enabled() as $code => $l) {
+            if (isset($map[$code])) {
+                $links[$code] = Posts::permalink($map[$code], true);
+            }
+        }
+        if (count($links) < 2) {
+            return $lines;
+        }
+        $extra = [];
+        foreach ($links as $code => $u) {
+            $extra[] = '<xhtml:link rel="alternate" hreflang="' . e(Languages::htmlLang($code)) . '" href="' . e($u) . '"/>';
+        }
+        if (isset($links[Languages::default()])) {
+            $extra[] = '<xhtml:link rel="alternate" hreflang="x-default" href="' . e($links[Languages::default()]) . '"/>';
+        }
+        $last = array_pop($lines);
+        if (!is_string($last) || trim($last) !== '</url>') {
+            // Unexpected shape (another module changed it): add the links before the closing tag wherever it is.
+            $lines[] = $last;
+            $html = implode("\n", array_map('strval', $lines));
+            $pos = strrpos($html, '</url>');
+            return $pos === false ? $lines : [substr($html, 0, $pos) . implode("\n", $extra) . "\n" . substr($html, $pos)];
+        }
+        return array_merge($lines, $extra, [$last]);
     }
 
     // ------------------------------------------------------------------ switcher & template tags
@@ -586,17 +645,5 @@ final class Urls
     {
         $qs = (string)($_SERVER['QUERY_STRING'] ?? '');
         return $qs !== '' ? '?' . $qs : '';
-    }
-
-    /** The frame that called Posts::permalink(), if this filter runs inside one. */
-    private static function caller(): ?array
-    {
-        $bt = debug_backtrace(DEBUG_BACKTRACE_IGNORE_ARGS, 12);
-        foreach ($bt as $i => $frame) {
-            if (($frame['class'] ?? '') === Posts::class && ($frame['function'] ?? '') === 'permalink') {
-                return $bt[$i + 1] ?? null;
-            }
-        }
-        return null;
     }
 }

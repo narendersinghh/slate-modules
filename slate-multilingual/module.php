@@ -42,6 +42,7 @@ if (DB::connected() && Languages::isActive()) {
     // Links.
     Hooks::add('permalink', [Urls::class, 'permalink'], 20);
     Hooks::add('term_link', [Urls::class, 'termLink'], 20);
+    Hooks::add('menu_item', [Urls::class, 'menuItem']);
 
     // Listings, archives, search and {{#query}} blocks show the visitor's language only.
     Hooks::add('posts_query_sql', [Translations::class, 'filterSql']);
@@ -53,12 +54,21 @@ if (DB::connected() && Languages::isActive()) {
         Translations::flush();
     });
 
-    // Output: redirects to the right language, <html lang dir>, hreflang, og:locale, schema inLanguage.
-    Hooks::add('html_output', [Urls::class, 'htmlOutput'], 5);
+    // Rendering: redirects to the right language, <html lang dir>, translated posts-page title.
+    Hooks::add('route_resolved', [Urls::class, 'routeResolved'], 5);
+    Hooks::add('frontend_vars', [Urls::class, 'frontendVars']);
+    Hooks::add('html_lang', [Urls::class, 'htmlLang']);
+    Hooks::add('html_dir', [Urls::class, 'htmlDir']);
+
+    // <head>: hreflang, og:locale, canonical of translated listings, schema inLanguage.
     Hooks::add('seo_head', [Urls::class, 'seoHead']);
     Hooks::add('seo_schema', [Urls::class, 'seoSchema']);
-    Hooks::add('seo_title', [Urls::class, 'seoTitle']);
     Hooks::add('page_cache_kind', [Urls::class, 'pageCacheKind']);
+
+    // Sitemaps: no items in disabled languages, hreflang alternates for translations.
+    Hooks::add('sitemap_posts', [Urls::class, 'sitemapPosts']);
+    Hooks::add('sitemap_urlset', [Urls::class, 'sitemapUrlset']);
+    Hooks::add('sitemap_entry', [Urls::class, 'sitemapEntry']);
 
     // REST API: ?lang=xx filters listings; every item gets "lang" and "translations".
     Hooks::add('init', [Urls::class, 'detectApi'], 1);

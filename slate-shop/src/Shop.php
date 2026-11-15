@@ -7,7 +7,6 @@ use Slate\Auth;
 use Slate\ContentModel;
 use Slate\Crypto;
 use Slate\Frontend;
-use Slate\Hooks;
 use Slate\Options;
 use Slate\PageCache;
 use Slate\Posts;
@@ -338,9 +337,9 @@ final class Shop
     }
 
     /**
-     * Render a full page inside the active theme. A theme can provide its own templates/shop-<view>.php (it gets
-     * the same variables plus $shop_content); otherwise the content is placed between the theme's header and
-     * footer partials, like core does for admin-built templates.
+     * Render a full page inside the active theme through core's output pipeline. A theme can provide its own
+     * templates/shop-<view>.php (it gets the same variables plus the rendered $shop_content); otherwise the
+     * content is placed between the theme's header and footer by Frontend::content().
      */
     public static function page(string $view, string $title, array $vars = [], int $status = 200): never
     {
@@ -349,33 +348,16 @@ final class Shop
         http_response_code($status);
         $path = parse_url($_SERVER['REQUEST_URI'] ?? '/', PHP_URL_PATH) ?: '/';
         Seo::$ctx = ['kind' => 'archive', 'title' => $title, 'url' => site_url(substr($path, strlen(base_path()))), 'page' => 1, 'shop_page' => true];
-        Frontend::$data = array_merge(Frontend::$data, ['kind' => 'shop', 'title' => $title, 'shop_view' => $view]);
+        $data = ['title' => $title, 'shop_view' => $view];
+        Frontend::$data = array_merge(Frontend::$data, $data, ['kind' => 'shop']);
 
         $content = self::view('front/' . $view, $vars + ['title' => $title]);
-        ob_start();
+        $wrapped = '<div class="wrap shop-page shop-page-' . e($view) . '">' . $content . '</div>';
         if (is_file(Theme::path('templates/shop-' . $view . '.php'))) {
-            Theme::render(['shop-' . $view], $vars + ['title' => $title, 'shop_content' => $content]);
-        } elseif (is_file(Theme::path('partials/header.php'))) {
-            Theme::partial('header');
-            echo '<div class="wrap shop-page shop-page-' . e($view) . '">' . $content . '</div>';
-            Theme::partial('footer');
+            Frontend::page('shop', $vars + $data + ['shop_content' => $content], ['shop-' . $view]);
         } else {
-            echo '<!doctype html><html lang="' . e((string)Options::get('language', 'en')) . '"><head><meta charset="utf-8">'
-                . '<meta name="viewport" content="width=device-width, initial-scale=1">';
-            slate_head();
-            echo '</head><body>';
-            slate_body_open();
-            echo '<main id="content" class="shop-page shop-page-' . e($view) . '">' . $content . '</main>';
-            slate_footer();
-            echo '</body></html>';
+            Frontend::content('shop', $wrapped, $data);
         }
-        $html = (string)ob_get_clean();
-        if (Options::get('html_minify', true)) {
-            $html = Frontend::minify($html);
-        }
-        $html = (string)Hooks::filter('html_output', $html);
-        header('Content-Type: text/html; charset=utf-8');
-        echo $html;
         exit;
     }
 

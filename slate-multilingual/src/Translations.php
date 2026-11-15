@@ -98,6 +98,31 @@ final class Translations
         return self::$groups[$key];
     }
 
+    /** Load many translation groups at once (sitemaps): fills the members() cache. */
+    public static function primeGroups(string $type, array $groups): void
+    {
+        $todo = [];
+        foreach (array_unique(array_filter(array_map('strval', $groups))) as $g) {
+            if (!isset(self::$groups[$type . '|' . $g])) {
+                $todo[] = $g;
+                self::$groups[$type . '|' . $g] = [];
+            }
+        }
+        $col = self::col('p.fields', self::GROUP);
+        foreach (array_chunk($todo, 400) as $chunk) {
+            [$in, $params] = self::inStrings($chunk, 'mg');
+            $rows = DB::all("SELECT p.*, $col AS ml_g FROM {{posts}} p WHERE p.type = :t AND p.status <> 'trash' AND $col IN ($in) ORDER BY p.id ASC",
+                $params + ['t' => $type]);
+            foreach ($rows as $row) {
+                $g = (string)$row['ml_g'];
+                unset($row['ml_g']);
+                if (($p = Posts::hydrate($row)) && isset(self::$groups[$type . '|' . $g])) {
+                    self::$groups[$type . '|' . $g][$p['id']] = $p;
+                }
+            }
+        }
+    }
+
     /**
      * The item and its translations, lang => post (one per language; the item itself wins its language).
      * @param bool $publishedOnly only published items (for links shown to visitors)
