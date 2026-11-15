@@ -407,6 +407,11 @@ final class Forms
             }
         }
         $body .= "View all submissions: " . admin_url('m/submissions?id=' . $id) . "\n";
+        if (class_exists(\Slate\Mailer::class)) {
+            // Slate 0.8+: one mail system for the whole site (SMTP when configured).
+            \Slate\Mailer::send($list, $subject, '<p>' . nl2br(e($body)) . '</p>', ['text' => $body, 'reply_to' => $replyTo]);
+            return;
+        }
         $host = (string)parse_url(site_url(), PHP_URL_HOST);
         $headers = 'From: ' . preg_replace('/[^\w .-]/u', '', (string)Options::get('site_title')) . ' <noreply@' . $host . ">\r\nContent-Type: text/plain; charset=utf-8"
             . ($replyTo ? "\r\nReply-To: " . $replyTo : '');
