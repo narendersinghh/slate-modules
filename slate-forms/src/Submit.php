@@ -75,6 +75,10 @@ final class Submit
             }
             $reply(false, implode("\n", $lines), 422, null, $errors, $old);
         }
+        // The form's own spam check (simple question, Turnstile, reCAPTCHA, hCaptcha), once the answers are fine.
+        if (($cerr = Captcha::verify($form, $_POST, $ip)) !== null) {
+            $reply(false, $cerr, 422, null, ['_captcha' => $cerr], $old);
+        }
 
         // Bots fill forms in a blink and rarely run JavaScript: keep those reviewable under Spam.
         $status = 'new';
@@ -86,9 +90,14 @@ final class Submit
         if (empty($_POST['_js']) && Options::get('forms_require_js', false)) {
             $status = 'spam';
         }
-        // Files are only kept for real entries.
+        // "Save entries" off (privacy): nothing is stored, the emails and actions are the only copy. Spam is dropped.
+        $keep = $st['store_entries'];
+        if (!$keep && $status === 'spam') {
+            $reply(true, $st['success_message'], 200, $redirect);
+        }
+        // Files are only kept for real, saved entries.
         foreach ($uploads as $key => $file) {
-            if ($status === 'new') {
+            if ($status === 'new' && $keep) {
                 $meta = self::saveUpload($file);
                 if ($meta === null) {
                     $reply(false, 'The file could not be saved. Please try again.', 500, null, [$key => 'The file could not be saved. Please try again.'], $old);
@@ -100,7 +109,7 @@ final class Submit
         $page = mb_substr(\Slate\ContentModel::cleanUrl((string)($_POST['_page'] ?? ($_SERVER['HTTP_REFERER'] ?? ''))), 0, 700);
         $page = (string)preg_replace('/([?&])sf=\d+(&|$)/', '$1', $page);
         $page = rtrim($page, '?&');
-        $id = Forms::store($form, $data, $page, mb_substr(strip_tags((string)($_POST['_title'] ?? '')), 0, 255), $status);
+        $id = $keep ? Forms::store($form, $data, $page, mb_substr(strip_tags((string)($_POST['_title'] ?? '')), 0, 255), $status) : 0;
         if ($status === 'new') {
             foreach (['notify', 'confirm'] as $fn) {
                 try {
@@ -114,13 +123,17 @@ final class Submit
                 $files = [];
                 foreach ($data as $k => $row) {
                     $fieldsOut[(string)$k] = $row['value'] ?? null;
-                    if (!empty($row['file'])) {
+                    if (!empty($row['file']) && $id) {
                         $files[(string)$k] = ['name' => $row['value'], 'size' => $row['file']['size'] ?? 0, 'url' => Forms::fileUrl($id, (string)$k, true)];
                     }
                 }
-                \Slate\Webhooks::dispatch('form.submitted', ['submission_id' => $id, 'form' => ['id' => (int)$form['id'], 'title' => $form['title'], 'slug' => $form['slug']],
+                \Slate\Webhooks::dispatch('form.submitted', ['submission_id' => $id ?: null, 'form' => ['id' => (int)$form['id'], 'title' => $form['title'], 'slug' => $form['slug']],
                     'page' => $page, 'fields' => $fieldsOut] + ($files ? ['files' => $files] : []));
             }
+        }
+        if ($status === 'new') {
+            // The form's own actions: webhooks, chat messages, email routing.
+            Actions::run($form, $data, $page, $id ?: null);
         }
         Hooks::action('form_submitted', $id, $form, $data);
         $reply(true, $st['success_message'], 200, $redirect);

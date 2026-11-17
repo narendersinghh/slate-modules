@@ -10,6 +10,7 @@ use Slate\Hooks;
 use Slate\Modules;
 use Slate\Router;
 use Slate\Session;
+use SlateModules\Forms\Actions;
 use SlateModules\Forms\Admin;
 use SlateModules\Forms\Forms;
 use SlateModules\Forms\Inbox;
@@ -20,6 +21,8 @@ require_once __DIR__ . '/src/Render.php';
 require_once __DIR__ . '/src/Submit.php';
 require_once __DIR__ . '/src/Inbox.php';
 require_once __DIR__ . '/src/Admin.php';
+require_once __DIR__ . '/src/Captcha.php';
+require_once __DIR__ . '/src/Actions.php';
 require_once __DIR__ . '/src/McpTools.php';
 
 Hooks::add('module_activated_slate-forms', [Forms::class, 'install']);
@@ -88,6 +91,15 @@ Modules::settings([
         'help' => 'Forms work without JavaScript. Turn this on only if spam keeps getting through; those entries stay reviewable under Spam.'],
     ['key' => 'forms_spam_days', 'type' => 'number', 'label' => 'Delete spam after', 'default' => 0, 'min' => 0, 'max' => 3650, 'suffix' => 'days',
         'help' => '0 = keep spam until you delete it.'],
+    ['type' => 'heading', 'label' => 'Spam check providers', 'help' => 'Keys for the spam checks a form can turn on in its Actions tab. A form whose provider has no keys simply skips the check. The built-in simple question needs no keys.'],
+    ['key' => 'forms_turnstile_site', 'type' => 'text', 'label' => 'Cloudflare Turnstile site key', 'default' => '', 'help' => 'From the Cloudflare dashboard › Turnstile.'],
+    ['key' => 'forms_turnstile_secret', 'type' => 'secret', 'label' => 'Cloudflare Turnstile secret key', 'default' => '', 'help' => 'Stored encrypted.'],
+    ['key' => 'forms_recaptcha_site', 'type' => 'text', 'label' => 'Google reCAPTCHA v3 site key', 'default' => '', 'help' => 'From the reCAPTCHA admin console (choose reCAPTCHA v3).'],
+    ['key' => 'forms_recaptcha_secret', 'type' => 'secret', 'label' => 'Google reCAPTCHA v3 secret key', 'default' => '', 'help' => 'Stored encrypted.'],
+    ['key' => 'forms_recaptcha_score', 'type' => 'number', 'label' => 'reCAPTCHA minimum score', 'default' => 0.5, 'min' => 0, 'max' => 1, 'step' => 0.1,
+        'help' => 'From 0 (likely a bot) to 1 (likely a person). Entries below it are refused. 0.5 suits most sites.'],
+    ['key' => 'forms_hcaptcha_site', 'type' => 'text', 'label' => 'hCaptcha site key', 'default' => ''],
+    ['key' => 'forms_hcaptcha_secret', 'type' => 'secret', 'label' => 'hCaptcha secret key', 'default' => '', 'help' => 'Stored encrypted.'],
     ['type' => 'heading', 'label' => 'File uploads', 'help' => 'Files are stored privately (content/form-uploads), renamed and never run. Only signed-in team members can download them.'],
     ['key' => 'forms_upload_max', 'type' => 'number', 'label' => 'Largest file', 'default' => 10, 'min' => 1, 'max' => 100, 'suffix' => 'MB',
         'help' => 'A field can set a lower limit. The server limit (upload_max_filesize) always applies.'],
@@ -98,7 +110,10 @@ Modules::settings([
         'help' => 'Agents connected with an API key can always create and change forms and see entry counts. With this on, they can also read the entries (names, emails, messages); IP addresses and browser details are never shared.'],
 ], ['help' => 'Options shared by all forms. Each form’s fields, messages and emails are set in the form builder.']);
 
-Hooks::add('cron_jobs', static fn(array $jobs): array => $jobs + ['forms_spam_cleanup' => ['every' => 86400, 'label' => 'Delete old form spam (Forms settings)', 'run' => [Inbox::class, 'purgeSpam']]]);
+Hooks::add('cron_jobs', static fn(array $jobs): array => $jobs + [
+    'forms_spam_cleanup' => ['every' => 86400, 'label' => 'Delete old form spam (Forms settings)', 'run' => [Inbox::class, 'purgeSpam']],
+    'forms_deliveries' => ['every' => 60, 'label' => 'Send form webhooks again that did not get through', 'run' => [Actions::class, 'cron']],
+]);
 
 Hooks::add('admin_routes', static function (Router $r): void {
     Admin::routes($r);

@@ -118,8 +118,7 @@
 .sfb-field > span { font-weight: 550; }
 .sfb-field small { display: block; margin-top: 4px; line-height: 1.4; }
 .sfb-req { margin: 0; }
-.sfb-seg { display: flex; flex-wrap: wrap; width: 100%; box-sizing: border-box; }
-.sfb-seg label { flex: 1 1 auto; justify-content: center; padding: 6px 8px; font-size: 13px; }
+.sfb-seg label { justify-content: center; padding: 6px 10px; font-size: 13px; }
 .sfb-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .sfb-adv { border-top: 1px solid var(--border); padding-top: 12px; }
 .sfb-adv > summary { display: flex; align-items: center; gap: 6px; cursor: pointer; font-weight: 600; color: var(--text-2); list-style: none; }
@@ -141,7 +140,9 @@
 /* settings + emails panes */
 .sfb-settings { display: flex; flex-direction: column; gap: 16px; max-width: 820px; }
 .sfb-settings .card-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
-.sfb-settings .seg { flex-wrap: wrap; }
+/* Segmented controls hug their buttons: the grey track never stretches across its row (flex parents included). */
+.sfb .seg { display: inline-flex; flex-wrap: wrap; width: fit-content; max-width: 100%; align-self: flex-start; box-sizing: border-box; }
+.sfb .seg label { flex: 0 0 auto; }
 .sfb-tags { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: -6px; }
 .sfb-tag { padding: 3px 8px; border: 1px solid var(--border); border-radius: 99px; background: var(--surface-2); color: var(--text-2); font: 500 12px var(--font); cursor: pointer; }
 .sfb-tag:hover { border-color: var(--accent); color: var(--accent-text); background: var(--accent-soft); }
@@ -178,4 +179,35 @@
   .sfb-tabs { display: flex; overflow-x: auto; }
   .sfb-pair { grid-template-columns: 1fr; }
   .sf-code code { max-width: 140px; }
+}
+
+/* ---------- actions tab (2.2) ---------- */
+.sfb-narrow { max-width: 340px; }
+.sfb-actions-list { display: flex; flex-direction: column; gap: 12px; }
+.sfb-action { box-shadow: none; border: 1px solid var(--border); }
+.sfb-action.is-off .sfb-action-body { opacity: .55; }
+.sfb-action-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.sfb-action-icon { display: grid; place-items: center; width: 32px; height: 32px; flex-shrink: 0; border-radius: 9px; background: var(--surface-3); color: var(--text-2); }
+.sfb-action-title { display: flex; flex-direction: column; min-width: 0; flex: 1 1 160px; }
+.sfb-action-title small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sfb-add-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.sfb-add-actions .small-label { margin: 0 4px 0 0; }
+.sfb-map { display: flex; flex-direction: column; gap: 6px; }
+.sfb-map-row { display: grid; grid-template-columns: auto minmax(0, 1fr) minmax(0, 220px); gap: 10px; align-items: center; }
+.sfb-map-row .input { font: 12.5px var(--mono); }
+.sfb-map-row .input:disabled { opacity: .5; }
+.sfb-headers { display: flex; flex-direction: column; gap: 6px; margin-bottom: 8px; }
+.sfb-header { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr) auto; gap: 6px; align-items: center; }
+.sfb-header .input { font: 12.5px var(--mono); }
+.sfb-a-when { margin: 0; }
+.sfb-a-rule { display: flex; gap: 8px; flex-wrap: wrap; }
+.sfb-a-rule .input { flex: 1 1 150px; width: auto; min-width: 0; }
+.sfb-log td { vertical-align: top; }
+.sfb-log-resp { color: var(--muted); max-width: 320px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .sfb-map-row { grid-template-columns: auto minmax(0, 1fr); }
+  .sfb-map-row .input { grid-column: 2; }
+  .sfb-header { grid-template-columns: minmax(0, 1fr) auto; }
+  .sfb-header .input:nth-child(2) { grid-column: 1; }
+  .sfb-log-resp { max-width: 160px; }
 }

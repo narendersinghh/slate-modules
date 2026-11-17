@@ -95,6 +95,8 @@ final class Render
             }
             $h .= self::field($fd, $uid, $c, $flat, $errors[$fd['key']] ?? null, $old);
         }
+        // Spam check of the form (last step of a multi-step form).
+        $h .= Captcha::html($form, $uid, $errors['_captcha'] ?? null, $flat);
         if ($steps) {
             $h .= '</fieldset>';
         }

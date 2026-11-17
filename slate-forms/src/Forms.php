@@ -23,7 +23,7 @@ final class Forms
 {
     public const TYPE = 'form';
     public const ENDPOINT = '/_slate/form';
-    public const VERSION_DB = 2;
+    public const VERSION_DB = 3;
 
     /** Field types: key => label. Order is the palette order in the builder. */
     public const FIELD_TYPES = [
@@ -81,6 +81,34 @@ final class Forms
             DB::exec('ALTER TABLE {{form_submissions}} ADD COLUMN starred ' . ($sqlite ? 'INTEGER' : 'TINYINT(1)') . ' NOT NULL DEFAULT 0');
         } catch (\PDOException) {
             // already there
+        }
+        // 2.2: queue and log of the form actions (webhooks and chat messages).
+        $pk = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY';
+        $int = $sqlite ? 'INTEGER' : 'INT UNSIGNED';
+        $text = $sqlite ? 'TEXT' : 'MEDIUMTEXT';
+        $tail = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+        DB::exec("CREATE TABLE IF NOT EXISTS {{form_deliveries}} (
+            id $pk,
+            form_id $int NOT NULL,
+            submission_id $int NULL,
+            action_id VARCHAR(40) NOT NULL DEFAULT '',
+            kind VARCHAR(20) NOT NULL DEFAULT 'webhook',
+            url VARCHAR(1000) NOT NULL DEFAULT '',
+            payload $text NULL,
+            content_type VARCHAR(80) NOT NULL DEFAULT 'application/json',
+            event VARCHAR(20) NOT NULL DEFAULT 'entry',
+            status VARCHAR(20) NOT NULL DEFAULT 'pending',
+            attempts $int NOT NULL DEFAULT 0,
+            response_code $int NULL,
+            response VARCHAR(500) NOT NULL DEFAULT '',
+            next_at DATETIME NOT NULL,
+            created_at DATETIME NOT NULL
+        )$tail");
+        foreach (['CREATE INDEX idx_fd_form ON {{form_deliveries}} (form_id, id)', 'CREATE INDEX idx_fd_due ON {{form_deliveries}} (status, next_at)'] as $sql) {
+            try {
+                DB::exec($sql);
+            } catch (\PDOException) {
+            }
         }
         Options::set('forms_db', self::VERSION_DB);
     }
@@ -262,6 +290,11 @@ final class Forms
             'closed_message' => $s('closed_message', 'This form is closed and no longer accepts entries.'),
             'next_label' => $s('next_label', 'Next'),
             'back_label' => $s('back_label', 'Back'),
+            // 2.2: actions and spam checks. Entries are saved unless a form says otherwise.
+            'store_entries' => !array_key_exists('store_entries', $f) || ($f['store_entries'] !== '0' && $f['store_entries'] !== false && $f['store_entries'] !== 0),
+            'captcha' => isset(Captcha::PROVIDERS[(string)($f['captcha'] ?? '')]) ? (string)($f['captcha'] ?? '') : '',
+            'captcha_question' => $s('captcha_question'),
+            'captcha_answer' => $s('captcha_answer'),
         ];
     }
 
@@ -525,11 +558,17 @@ final class Forms
         return $html ? $out . '</table>' : rtrim($out);
     }
 
-    /** Email the site team about a new entry. */
-    public static function notify(array $form, array $data, string $page, int $id): void
+    /**
+     * Email the site team about a new entry. $opts (form actions, email routing): to, subject. $id 0 = the entry
+     * was not saved (the form keeps no entries), so there is no dashboard link.
+     */
+    public static function notify(array $form, array $data, string $page, int $id, array $opts = []): void
     {
         $f = (array)($form['fields'] ?? []);
-        $to = trim((string)($f['notify_to'] ?? ''));
+        $to = trim((string)($opts['to'] ?? ($f['notify_to'] ?? '')));
+        if (!empty($opts['subject'])) {
+            $f['email_subject'] = (string)$opts['subject'];
+        }
         if (strtolower($to) === 'none') {
             return;
         }
@@ -542,10 +581,12 @@ final class Forms
         $subject = trim((string)preg_replace('/\s+/', ' ', $subject));
         $replyTo = self::submitterEmail($data);
         $link = site_url(admin_slug() . '/m/submissions?id=' . $id);
-        $text = "New entry from \"{$form['title']}\"" . ($page ? " on $page" : '') . "\n\n" . self::fieldsTable($data, false) . "\n\nOpen it in the dashboard: $link\n";
+        $text = "New entry from \"{$form['title']}\"" . ($page ? " on $page" : '') . "\n\n" . self::fieldsTable($data, false)
+            . ($id ? "\n\nOpen it in the dashboard: $link\n" : "\n\nThis form does not keep entries: this email is the only copy.\n");
         $html = '<div style="font:15px/1.6 sans-serif;color:#1f1f1f"><p>New entry from <strong>' . e((string)$form['title']) . '</strong>'
             . ($page ? ' on <a href="' . e($page) . '">' . e($page) . '</a>' : '') . '</p>' . self::fieldsTable($data, true, $id)
-            . '<p style="margin-top:20px"><a href="' . e($link) . '" style="display:inline-block;padding:10px 16px;background:#0D0D0E;color:#fff;border-radius:8px;text-decoration:none">Open in the dashboard</a>'
+            . '<p style="margin-top:20px">' . ($id ? '<a href="' . e($link) . '" style="display:inline-block;padding:10px 16px;background:#0D0D0E;color:#fff;border-radius:8px;text-decoration:none">Open in the dashboard</a>'
+                : 'This form does not keep entries: this email is the only copy.')
             . ($replyTo ? ' &nbsp; Reply to this email to answer ' . e($replyTo) . '.' : '') . '</p></div>';
         self::mail($list, $subject, $html, $text, $replyTo);
     }

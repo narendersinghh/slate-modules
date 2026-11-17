@@ -194,9 +194,13 @@ final class Admin
             'fields' => $rows, 'settings' => $settings, 'defaults' => $st,
             'types' => Forms::FIELD_TYPES, 'uploadTypes' => implode(', ', Submit::allowedTypes()), 'uploadMax' => round(Submit::maxSize([]) / 1048576, 1),
             'entries' => $stats['total'], 'unread' => $stats['unread'],
-            'urls' => ['save' => admin_url('m/forms/save'), 'preview' => admin_url('m/forms/preview?id=' . $id), 'list' => self::listUrl(),
+            'urls' => ['save' => admin_url('m/forms/save'), 'test' => admin_url('m/forms/action-test'), 'retry' => admin_url('m/forms/delivery-retry'), 'preview' => admin_url('m/forms/preview?id=' . $id), 'list' => self::listUrl(),
                 'entries' => Inbox::url(['f' => ['form' => $id]]), 'settings' => AdminUi::settingsUrl(self::MODULE)],
             'adminEmail' => (string)\Slate\Options::get('forms_notify_to', '') ?: (string)\Slate\Options::get('admin_email'),
+            'actions' => Actions::forBuilder($form),
+            'actionTypes' => Actions::TYPES,
+            'deliveries' => Actions::recent($id),
+            'captcha' => ['providers' => Captcha::PROVIDERS, 'ready' => array_map(static fn($p) => Captcha::configured((string)$p), array_combine(array_keys(Captcha::PROVIDERS), array_keys(Captcha::PROVIDERS)))],
         ];
         echo self::assets(true);
         echo '<div class="sfb" data-sfb><script type="application/json" data-sfb-config>' . json_encode($config, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP) . '</script>'
@@ -220,11 +224,20 @@ final class Admin
         $fields = self::cleanFields((array)($in['fields'] ?? []));
         $settings = self::cleanSettings((array)($in['settings'] ?? []));
         $status = ($in['status'] ?? '') === 'draft' ? 'draft' : 'publish';
-        Posts::save(['title' => mb_substr($title, 0, 190), 'status' => $status, 'fields' => ['form_fields' => $fields] + $settings], $id);
+        $data = ['form_fields' => $fields] + $settings;
+        if (isset($in['actions']) && is_array($in['actions'])) {
+            [$actions, $err] = Actions::clean($in['actions'], Actions::of($form), array_column($fields, 'name'));
+            if ($err !== null) {
+                json_response(['ok' => false, 'error' => $err], 422);
+            }
+            $data['actions'] = $actions;
+        }
+        Posts::save(['title' => mb_substr($title, 0, 190), 'status' => $status, 'fields' => $data], $id);
         PageCache::clear(); // the form can be on any page
         log_activity('form_saved', $title);
         $f = Posts::find($id);
-        json_response(['ok' => true, 'id' => $id, 'slug' => $f['slug'] ?? '', 'status' => $f['status'] ?? $status, 'message' => 'Form saved.']);
+        json_response(['ok' => true, 'id' => $id, 'slug' => $f['slug'] ?? '', 'status' => $f['status'] ?? $status, 'message' => 'Form saved.',
+            'actions' => $f ? Actions::forBuilder($f) : []]);
     }
 
     /** Whitelist and clean the field rows sent by the builder. */
@@ -319,6 +332,10 @@ final class Admin
             'closed_message' => strip_tags($str('closed_message', 1000)),
             'next_label' => strip_tags($str('next_label', 40)),
             'back_label' => strip_tags($str('back_label', 40)),
+            'store_entries' => !array_key_exists('store_entries', $s) || !in_array($s['store_entries'], [false, 0, '0', ''], true) ? '1' : '0',
+            'captcha' => isset(Captcha::PROVIDERS[(string)($s['captcha'] ?? '')]) ? (string)($s['captcha'] ?? '') : '',
+            'captcha_question' => strip_tags($str('captcha_question', 200)),
+            'captcha_answer' => strip_tags($str('captcha_answer', 300)),
         ];
     }
 
@@ -327,6 +344,33 @@ final class Admin
     public static function routes(Router $r): void
     {
         $r->post('/m/forms/save', [self::class, 'save']);
+
+        // Send one action now with sample answers (the builder's "Send test"), unsaved changes included.
+        $r->post('/m/forms/action-test', static function (): never {
+            Auth::require(self::CAP);
+            $in = json_input() ?: $_POST;
+            $form = Posts::find((int)($in['id'] ?? 0));
+            if (!$form || $form['type'] !== Forms::TYPE) {
+                json_response(['ok' => false, 'error' => 'Form not found.'], 404);
+            }
+            $keys = array_column(Forms::fields($form), 'key');
+            [$list, $err] = Actions::clean([(array)($in['action'] ?? [])], Actions::of($form), $keys);
+            if ($err !== null || !$list) {
+                json_response(['ok' => false, 'error' => $err ?? 'Nothing to test.'], 422);
+            }
+            [$ok, $msg] = Actions::test($form, $list[0]);
+            json_response(['ok' => $ok, 'message' => $msg, 'error' => $ok ? null : $msg, 'deliveries' => Actions::recent((int)$form['id'])]);
+        });
+        $r->post('/m/forms/delivery-retry', static function (): never {
+            Auth::require(self::CAP);
+            $id = (int)input('delivery', 0);
+            $row = DB::row('SELECT form_id FROM {{form_deliveries}} WHERE id = :id', ['id' => $id]);
+            if (!$row) {
+                json_response(['ok' => false, 'error' => 'Delivery not found.'], 404);
+            }
+            Actions::retry($id);
+            json_response(['ok' => true, 'deliveries' => Actions::recent((int)$row['form_id'])]);
+        });
 
         // New form from a template: the template cards (redirect to the builder) and the editor picker (JSON).
         $r->post('/m/forms/create', static function (): never {

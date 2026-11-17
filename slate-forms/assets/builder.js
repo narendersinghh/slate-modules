@@ -42,6 +42,8 @@
     branch: '<circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="18" cy="8" r="2"/><path d="M6 8v8M18 10c0 4-6 3-10 6"/>',
     check: '<path d="M20 6 9 17l-5-5"/>',
     info: '<circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/>',
+    zap: '<path d="M13 2 3 14h9l-1 8 10-12h-9z"/>',
+    message: '<path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>',
     inbox: '<path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.5 5.1 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.5-6.9A2 2 0 0 0 16.8 4H7.2a2 2 0 0 0-1.7 1.1z"/>',
   };
   const ic = (n, s = 16) => '<svg class="ic" width="' + s + '" height="' + s + '" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' + (P[n] || '') + '</svg>';
@@ -96,6 +98,7 @@
       '<button type="button" role="tab" data-tab="fields">' + ic('para', 15) + ' Fields</button>' +
       '<button type="button" role="tab" data-tab="settings">' + ic('settings', 15) + ' After sending</button>' +
       '<button type="button" role="tab" data-tab="emails">' + ic('mail', 15) + ' Emails</button>' +
+      '<button type="button" role="tab" data-tab="actions">' + ic('zap', 15) + ' Actions</button>' +
     '</nav>' +
     '<section class="sfb-pane sfb-build" data-pane="fields">' +
       '<aside class="sfb-palette" aria-label="Add a field"></aside>' +
@@ -103,7 +106,8 @@
       '<aside class="sfb-inspector card" data-inspector aria-live="polite"></aside>' +
     '</section>' +
     '<section class="sfb-pane sfb-settings" data-pane="settings" hidden></section>' +
-    '<section class="sfb-pane sfb-settings" data-pane="emails" hidden></section>';
+    '<section class="sfb-pane sfb-settings" data-pane="emails" hidden></section>' +
+    '<section class="sfb-pane sfb-settings" data-pane="actions" hidden></section>';
 
   const $ = (s, r = root) => r.querySelector(s);
   const $$ = (s, r = root) => Array.from(r.querySelectorAll(s));
@@ -516,8 +520,7 @@
         '<p class="muted small">The default look uses your design system colours, corners and fonts. "Website’s own styles" prints plain markup for pages with their own form design.</p>' +
         fieldRow('Extra CSS classes', sIn('css_class', 'placeholder="Optional"')) +
         (steps ? '<div class="sfb-pair">' + fieldRow('Next button', sIn('next_label')) + fieldRow('Back button', sIn('back_label')) + '</div>' : '') +
-      '</div></div>' +
-      '<div class="card sfb-spam"><div class="card-pad">' + ic('shield', 18) + '<div><strong>Spam protection is on</strong><p class="muted small">Every form has a hidden honeypot field, a minimum fill-in time and a limit per visitor. Change these for all forms in <a href="' + esc(cfg.urls.settings) + '">Forms settings</a>.</p></div></div></div>';
+      '</div></div>';
   }
   function renderEmails() {
     const on = (S.notify_to || '').toLowerCase() !== 'none';
@@ -567,6 +570,186 @@
     });
   });
 
+  // ---------- actions and spam check ----------
+  state.actions = (cfg.actions || []).map((a) => JSON.parse(JSON.stringify(a)));
+  let deliveries = cfg.deliveries || [];
+  const A_ICON = { webhook: 'code', slack: 'message', discord: 'message', teams: 'message', email: 'mail' };
+  const A_HELP = {
+    webhook: 'Any address that accepts a POST: Zapier, Make, n8n, a CRM or your own app.',
+    slack: 'In Slack: Apps › Incoming Webhooks › Add to a channel, then paste the webhook URL.',
+    discord: 'In Discord: channel settings › Integrations › Webhooks › New webhook › Copy webhook URL.',
+    teams: 'In Teams: the channel menu › Workflows (or Connectors) › Post to a channel when a webhook request is received.',
+    email: 'Sends the same notification as the Emails tab to other people, for example sales@ when the topic is Sales.',
+  };
+  const A_PH = { webhook: 'https://example.com/hooks/forms', slack: 'https://hooks.slack.com/services/...', discord: 'https://discord.com/api/webhooks/...', teams: 'https://....webhook.office.com/...' };
+  const seg = (name, cur, opts, attr) => '<div class="seg sfb-seg-inline" role="radiogroup">' + opts.map(([v, l]) => '<label><input type="radio" name="' + name + '" value="' + v + '" ' + attr + (cur === v ? ' checked' : '') + '>' + l + '</label>').join('') + '</div>';
+  function actionCond(a, i) {
+    const others = valueFields().filter((x) => x.type !== 'hidden');
+    if (!others.length) return '';
+    const c = a.cond;
+    let h = '<label class="switch-row sfb-a-when"><input type="checkbox" class="switch switch-sm" data-a="' + i + '" data-ak="cond_on"' + (c ? ' checked' : '') + '><span>Only when an answer matches</span></label>';
+    if (c) {
+      const target = others.find((x) => x.name === c.field) || others[0];
+      const ch = CHOICE.includes(target.type) ? parseChoices(target.options) : target.type === 'consent' ? [{ v: 'yes', l: 'Ticked' }] : null;
+      h += '<div class="sfb-a-rule"><select class="input" data-a="' + i + '" data-ac="field" aria-label="Field">' + others.map((x) => '<option value="' + esc(x.name) + '"' + (x === target ? ' selected' : '') + '>' + esc(x.label || x.name) + '</option>').join('') + '</select>' +
+        '<select class="input" data-a="' + i + '" data-ac="op" aria-label="Rule">' + Object.entries(OPS).map(([k, l]) => '<option value="' + k + '"' + (k === c.op ? ' selected' : '') + '>' + l + '</option>').join('') + '</select>' +
+        (['filled', 'empty'].includes(c.op) ? '' : ch ? '<select class="input" data-a="' + i + '" data-ac="value" aria-label="Value">' + ch.map((o) => '<option value="' + esc(o.v) + '"' + (o.v === c.value ? ' selected' : '') + '>' + esc(o.l) + '</option>').join('') + '</select>'
+          : '<input class="input" data-a="' + i + '" data-ac="value" value="' + esc(c.value) + '" placeholder="Value" aria-label="Value">') + '</div>';
+    }
+    return h;
+  }
+  function actionCard(a, i) {
+    const http = a.type !== 'email';
+    let b = '<p class="muted small">' + esc(A_HELP[a.type]) + '</p>';
+    if (http) b += fieldRow(a.type === 'webhook' ? 'Address (URL)' : 'Webhook URL', '<input class="input" type="url" data-a="' + i + '" data-ak="url" value="' + esc(a.url) + '" placeholder="' + esc(A_PH[a.type]) + '" spellcheck="false">');
+    if (a.type === 'webhook') {
+      b += '<div class="field sfb-field"><span>Send as</span>' + seg('sfb-fmt-' + i, a.format || 'json', [['json', 'JSON'], ['form', 'Form data']], 'data-a="' + i + '" data-ak="format"') + '</div>';
+      b += '<div class="field sfb-field"><span>Fields</span>' + seg('sfb-fl-' + i, a.fields || 'all', [['all', 'All fields'], ['chosen', 'Chosen fields']], 'data-a="' + i + '" data-ak="fields"') + '</div>';
+      if (a.fields === 'chosen') {
+        const map = {};
+        (a.map || []).forEach((m) => { map[m.field] = m.key; });
+        b += '<div class="sfb-map">' + valueFields().map((f) => '<label class="sfb-map-row"><input type="checkbox" data-a="' + i + '" data-map="' + esc(f.name) + '"' + (f.name in map ? ' checked' : '') + '><span>' + esc(f.label || f.name) + '</span>' +
+          '<input class="input" data-a="' + i + '" data-mapkey="' + esc(f.name) + '" value="' + esc(map[f.name] ?? f.name) + '" aria-label="Key sent for ' + esc(f.label || f.name) + '"' + (f.name in map ? '' : ' disabled') + ' spellcheck="false"></label>').join('') + '</div><small class="muted">Tick the fields to send. The box on the right is the key the receiver gets.</small>';
+      }
+      b += '<details class="sfb-adv"' + ((a.headers || []).length || a.has_secret ? ' open' : '') + '><summary>Headers and signature</summary>' +
+        '<div class="sfb-headers">' + (a.headers || []).map((h, j) => '<div class="sfb-header"><input class="input" data-a="' + i + '" data-hn="' + j + '" value="' + esc(h.name) + '" placeholder="Header name" spellcheck="false" aria-label="Header name">' +
+          '<input class="input" data-a="' + i + '" data-hv="' + j + '" value="' + esc(h.value) + '" placeholder="' + (h.saved ? 'Saved, leave empty to keep' : 'Value') + '" spellcheck="false" aria-label="Header value">' +
+          '<button type="button" class="icon-btn" data-a="' + i + '" data-hdel="' + j + '" title="Remove header" aria-label="Remove header">' + ic('x', 14) + '</button></div>').join('') + '</div>' +
+        '<button type="button" class="btn btn-sm" data-a="' + i + '" data-hadd>' + ic('plus', 14) + ' Add header</button>' +
+        fieldRow('Signing secret', '<input class="input" type="password" autocomplete="new-password" data-a="' + i + '" data-ak="secret" value="' + esc(a.secret || '') + '" placeholder="' + (a.has_secret ? 'Saved, leave empty to keep' : 'Optional') + '">',
+          'Adds X-Slate-Signature: sha256=HMAC-SHA256(secret, timestamp + "." + body), with the timestamp in X-Slate-Timestamp. Stored encrypted.') +
+        (a.has_secret ? '<label class="small sfb-cv-toggle"><input type="checkbox" data-a="' + i + '" data-ak="secret_clear"' + (a.secret_clear ? ' checked' : '') + '> Remove the saved secret</label>' : '') + '</details>';
+    }
+    if (a.type === 'email') {
+      b += fieldRow('Send to', '<input class="input" data-a="' + i + '" data-ak="to" value="' + esc(a.to) + '" placeholder="sales@example.com">', 'Several addresses? Separate them with commas.');
+      b += fieldRow('Subject', '<input class="input" data-a="' + i + '" data-ak="subject" value="' + esc(a.subject) + '" placeholder="' + esc(S.email_subject || cfg.defaults.email_subject) + '">');
+    }
+    b += actionCond(a, i);
+    const summary = http ? (a.url ? (a.url.replace(/^https?:\/\//, '').split('/')[0]) : 'No address yet') : (a.to || 'No recipients yet');
+    return '<div class="card sfb-action' + (a.on ? '' : ' is-off') + '" data-ai="' + i + '"><div class="card-head sfb-action-head"><span class="sfb-action-icon">' + ic(A_ICON[a.type], 16) + '</span>' +
+      '<div class="sfb-action-title"><strong>' + esc(cfg.actionTypes[a.type]) + '</strong><small class="muted">' + esc(summary) + '</small></div>' +
+      (http ? '<button type="button" class="btn btn-sm" data-a="' + i + '" data-atest>Send test</button>' : '') +
+      '<input type="checkbox" class="switch" data-a="' + i + '" data-ak="on" aria-label="Action on or off"' + (a.on ? ' checked' : '') + '>' +
+      '<button type="button" class="icon-btn" data-a="' + i + '" data-adel title="Remove action" aria-label="Remove action">' + ic('trash', 15) + '</button></div>' +
+      '<div class="card-pad stack sfb-action-body">' + b + '</div></div>';
+  }
+  function deliveriesHtml() {
+    if (!deliveries.length) return '<p class="muted">Nothing sent yet. Deliveries of webhooks and chat messages show here, with their answers.</p>';
+    const tone = { delivered: 'success', failed: 'danger', pending: 'warn' };
+    return '<div class="table-wrap"><table class="table table-compact sfb-log"><thead><tr><th>When</th><th>Action</th><th>Result</th><th>Answer</th><th></th></tr></thead><tbody>' + deliveries.map((d) =>
+      '<tr><td class="nowrap">' + esc(d.when) + (d.event === 'test' ? ' <span class="pill">Test</span>' : '') + '</td><td>' + esc((cfg.actionTypes[d.kind] || d.kind) + (d.host ? ', ' + d.host : '')) + '</td>' +
+      '<td class="nowrap"><span class="pill pill-' + (tone[d.status] || 'info') + '">' + esc(d.status === 'delivered' ? 'Delivered' : d.status === 'failed' ? 'Failed' : 'Retrying') + '</span>' + (d.code ? ' <span class="muted small">HTTP ' + d.code + '</span>' : '') + (d.attempts > 1 ? ' <span class="muted small">' + d.attempts + ' tries</span>' : '') + '</td>' +
+      '<td class="small sfb-log-resp">' + esc((d.response || '').slice(0, 140)) + '</td><td>' + (d.status === 'failed' && d.event !== 'test' ? '<button type="button" class="btn btn-sm btn-ghost" data-retry="' + d.id + '">Send again</button>' : '') + '</td></tr>').join('') + '</tbody></table></div>';
+  }
+  function renderActions() {
+    const p = S.captcha || '';
+    const ready = (cfg.captcha.ready || {})[p];
+    const third = ['turnstile', 'recaptcha', 'hcaptcha'].includes(p);
+    const keep = S.store_entries !== false && S.store_entries !== '0';
+    $('[data-pane="actions"]').innerHTML =
+      '<div class="card"><div class="card-head"><h2>Spam check</h2></div><div class="card-pad stack">' +
+        '<p class="muted small">' + ic('shield', 14) + ' Always on for every form: a hidden honeypot field, a minimum fill-in time and a limit per visitor (<a href="' + esc(cfg.urls.settings) + '">Forms settings</a>). Add a check here if spam still gets through.</p>' +
+        fieldRow('Extra check', '<select class="input sfb-narrow" data-s="captcha">' + Object.entries(cfg.captcha.providers).map(([k, l]) => '<option value="' + k + '"' + (k === p ? ' selected' : '') + '>' + esc(l) + (k && k !== 'question' && !(cfg.captcha.ready || {})[k] ? ' (needs keys)' : '') + '</option>').join('') + '</select>') +
+        (p === 'question' ? '<div class="sfb-pair">' + fieldRow('Question', sIn('captcha_question', 'placeholder="Empty = a small sum, like What is 3 plus 4?"')) + fieldRow('Accepted answers', sIn('captcha_answer', 'placeholder="blue, light blue"'), 'Comma-separated, not case-sensitive.') + '</div>' +
+          '<p class="muted small">Works without JavaScript and without any outside service.</p>' : '') +
+        (third ? (ready ? '<p class="muted small">' + ic('info', 14) + ' Needs JavaScript in the visitor\'s browser; people without it see a short note. The check is verified on the server.</p>'
+          : '<div class="alert alert-error">' + ic('info', 15) + ' Add the ' + esc(cfg.captcha.providers[p]) + ' keys in <a href="' + esc(cfg.urls.settings) + '">Forms settings</a>. Until then the form works without this check.</div>') : '') +
+      '</div></div>' +
+      '<div class="card"><div class="card-head"><h2>Save entries</h2><input type="checkbox" class="switch" data-s="store_entries" aria-label="Save entries"' + (keep ? ' checked' : '') + '></div><div class="card-pad">' +
+        (keep ? '<p class="muted">Every entry is kept under Entries, where you can search, star and export it.</p>'
+          : '<div class="alert alert-error">' + ic('info', 15) + ' Entries are not kept. The emails and the actions below are the only copy; uploaded files are not kept, and the entry limit cannot count.</div>') + '</div></div>' +
+      '<div class="card"><div class="card-head"><h2>Actions</h2></div><div class="card-pad stack">' +
+        '<p class="muted small">Things that happen with every new entry (spam excluded). Each one can be switched off, and can run only when an answer matches.</p>' +
+        '<div class="sfb-actions-list">' + (state.actions.length ? state.actions.map(actionCard).join('') : '<p class="muted">No actions yet.</p>') + '</div>' +
+        '<div class="sfb-add-actions"><span class="small-label">Add</span>' + Object.entries(cfg.actionTypes).map(([k, l]) => '<button type="button" class="btn btn-sm" data-aadd="' + k + '">' + ic(A_ICON[k], 14) + ' ' + esc(l) + '</button>').join('') + '</div>' +
+      '</div></div>' +
+      '<div class="card"><div class="card-head"><h2>Recent deliveries</h2></div><div class="card-pad" data-deliveries>' + deliveriesHtml() + '</div></div>';
+  }
+  const actPane = () => $('[data-pane="actions"]');
+  function onAction(e) {
+    const el = e.target;
+    if (el.dataset.s) return; // settings inputs (captcha, store_entries) go through onSetting
+    if (el.dataset.a === undefined) return;
+    const a = state.actions[+el.dataset.a];
+    if (!a) return;
+    if (el.dataset.ak) {
+      const k = el.dataset.ak;
+      if (el.type === 'radio' && !el.checked) return;
+      if (k === 'cond_on') {
+        const f = valueFields().filter((x) => x.type !== 'hidden')[0];
+        a.cond = el.checked && f ? { field: f.name, op: 'is', value: CHOICE.includes(f.type) ? (parseChoices(f.options)[0]?.v || '') : '' } : null;
+        mark(); renderActions(); return;
+      }
+      a[k] = el.type === 'checkbox' ? el.checked : el.value;
+      mark();
+      if (['fields', 'on'].includes(k)) renderActions();
+      // Keep the card summary current without rebuilding the card (that would swallow the next click).
+      if (k === 'url' || k === 'to') {
+        const sm = el.closest('.sfb-action')?.querySelector('.sfb-action-title small');
+        if (sm) sm.textContent = k === 'url' ? (a.url ? a.url.replace(/^https?:\/\//, '').split('/')[0] : 'No address yet') : (a.to || 'No recipients yet');
+      }
+      return;
+    }
+    if (el.dataset.ac && a.cond) {
+      a.cond[el.dataset.ac] = el.value;
+      if (el.dataset.ac === 'field') { const t = state.fields.find((x) => x.name === el.value); a.cond.value = t && CHOICE.includes(t.type) ? (parseChoices(t.options)[0]?.v || '') : t && t.type === 'consent' ? 'yes' : ''; }
+      mark();
+      if (e.type === 'change' && ['field', 'op'].includes(el.dataset.ac)) renderActions();
+      return;
+    }
+    if (el.dataset.map !== undefined) {
+      a.map = (a.map || []).filter((m) => m.field !== el.dataset.map);
+      if (el.checked) { const k = actPane().querySelector('[data-mapkey="' + el.dataset.map + '"][data-a="' + el.dataset.a + '"]'); a.map.push({ field: el.dataset.map, key: (k && k.value) || el.dataset.map }); }
+      mark(); renderActions(); return;
+    }
+    if (el.dataset.mapkey !== undefined) { const m = (a.map || []).find((x) => x.field === el.dataset.mapkey); if (m) { m.key = el.value; mark(); } return; }
+    if (el.dataset.hn !== undefined) { a.headers[+el.dataset.hn].name = el.value; mark(); return; }
+    if (el.dataset.hv !== undefined) { a.headers[+el.dataset.hv].value = el.value; mark(); }
+  }
+  actPane().addEventListener('input', onAction);
+  actPane().addEventListener('change', onAction);
+  actPane().addEventListener('input', onSetting);
+  // Only choices that change the layout rebuild the tab; text boxes never do (it would steal the focus).
+  actPane().addEventListener('change', (e) => { if (e.target.dataset.s && (e.target.tagName === 'SELECT' || e.target.type === 'checkbox')) { onSetting(e); renderActions(); } });
+  actPane().addEventListener('click', async (e) => {
+    const add = e.target.closest('[data-aadd]');
+    if (add) {
+      state.actions.push({ id: 'a' + Math.random().toString(36).slice(2, 10), type: add.dataset.aadd, on: true, url: '', format: 'json', fields: 'all', map: [], headers: [], secret: '', has_secret: false, to: '', subject: '', cond: null });
+      mark(); renderActions();
+      const cards = $$('.sfb-action', actPane());
+      cards[cards.length - 1]?.querySelector('input.input')?.focus();
+      return;
+    }
+    const b = e.target.closest('[data-a]');
+    const retry = e.target.closest('[data-retry]');
+    if (retry) {
+      retry.classList.add('is-loading');
+      const res = await post(cfg.urls.retry, { delivery: +retry.dataset.retry });
+      if (res.deliveries) { deliveries = res.deliveries; $('[data-deliveries]', actPane()).innerHTML = deliveriesHtml(); }
+      toast(res.ok ? 'Sent again.' : (res.error || 'Could not send it again.'), res.ok ? 'success' : 'error');
+      return;
+    }
+    if (!b) return;
+    const i = +b.dataset.a, a = state.actions[i];
+    if (b.matches('[data-adel]')) { if (a.url || a.to ? confirm('Remove this action?') : true) { state.actions.splice(i, 1); mark(); renderActions(); } return; }
+    if (b.matches('[data-hadd]')) { a.headers = a.headers || []; a.headers.push({ name: '', value: '' }); mark(); renderActions(); return; }
+    if (b.matches('[data-hdel]')) { a.headers.splice(+b.dataset.hdel, 1); mark(); renderActions(); return; }
+    if (b.matches('[data-atest]')) {
+      if (!a.url) { toast('Add the address first.', 'error'); return; }
+      b.classList.add('is-loading');
+      const res = await post(cfg.urls.test, { id: cfg.id, action: a });
+      b.classList.remove('is-loading');
+      if (res.deliveries) { deliveries = res.deliveries; $('[data-deliveries]', actPane()).innerHTML = deliveriesHtml(); }
+      toast(res.message || res.error || 'Test sent.', res.ok ? 'success' : 'error', 6000);
+    }
+  });
+  async function post(url, body) {
+    try {
+      const r = await fetch(url, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': (window.SLATE || {}).csrf || '' }, body: JSON.stringify(body) });
+      return await r.json();
+    } catch (e) { return { ok: false, error: 'Network error.' }; }
+  }
+
   // ---------- tabs ----------
   function setTab(t) {
     state.tab = t;
@@ -574,6 +757,7 @@
     $$('[data-pane]').forEach((p) => { p.hidden = p.dataset.pane !== t; });
     if (t === 'settings') renderSettings();
     if (t === 'emails') renderEmails();
+    if (t === 'actions') renderActions();
     try { sessionStorage.setItem('sfb-tab-' + cfg.id, t); } catch (e) {}
   }
   $('.sfb-tabs').addEventListener('click', (e) => { const b = e.target.closest('[data-tab]'); if (b) setTab(b.dataset.tab); });
@@ -600,7 +784,8 @@
     const btn = $('[data-save]');
     btn.classList.add('is-loading');
     const body = { id: cfg.id, title: state.title, status: state.status, settings: Object.assign({}, S),
-      fields: state.fields.map((f) => { const o = Object.assign({}, f); Object.keys(o).forEach((k) => { if (k[0] === '_') delete o[k]; }); return o; }) };
+      fields: state.fields.map((f) => { const o = Object.assign({}, f); Object.keys(o).forEach((k) => { if (k[0] === '_') delete o[k]; }); return o; }),
+      actions: state.actions.map((a) => ({ id: a.id, type: a.type, on: !!a.on, url: a.url || '', format: a.format, fields: a.fields, map: a.map || [], headers: (a.headers || []).filter((h) => h.name), secret: a.secret || '', secret_clear: !!a.secret_clear, to: a.to || '', subject: a.subject || '', cond: a.cond })) };
     let res;
     try {
       const r = await fetch(cfg.urls.save, { method: 'POST', credentials: 'same-origin', headers: { 'Content-Type': 'application/json', Accept: 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-Token': (window.SLATE || {}).csrf || '' }, body: JSON.stringify(body) });
@@ -611,6 +796,7 @@
     dirty = false;
     state.fields.forEach((f) => { delete f._new; });
     cfg.slug = res.slug || cfg.slug;
+    if (res.actions) { state.actions = res.actions; if (state.tab === 'actions') renderActions(); }
     state.status = res.status || state.status;
     syncStatus();
     $('[data-save-state]').textContent = 'Saved ' + new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -625,5 +811,5 @@
   renderInspector();
   let start = 'fields';
   try { start = sessionStorage.getItem('sfb-tab-' + cfg.id) || 'fields'; } catch (e) {}
-  setTab(['fields', 'settings', 'emails'].includes(start) ? start : 'fields');
+  setTab(['fields', 'settings', 'emails', 'actions'].includes(start) ? start : 'fields');
 })();

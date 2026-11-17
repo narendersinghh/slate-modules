@@ -209,6 +209,7 @@
     var touched = {};
     var onChange = function (e) {
       applyRules(form);
+      if (e.target.name === '_captcha') { if (e.target.value.trim()) setError(form, '_captcha', ''); return; }
       var m = e.target.name && e.target.name.match(/^fields\[([^\]]+)\]/);
       // Fields already showing a message update while typing, so the message goes away as soon as the answer is fine.
       var showing = m && Array.prototype.some.call(parts(form, m[1]), function (el) { return (el.matches('[data-sf-error]') || el.querySelector && el.querySelector('[data-sf-error]:not([hidden])')) && !(el.matches('[data-sf-error]') && el.hidden); });
@@ -227,7 +228,11 @@
       applyRules(form);
       show(ok, false);
       show(err, false);
-      if (!validate(form, keysIn(form, form))) {
+      var q = form.querySelector('input[name="_captcha"]');
+      var qBad = q && !q.value.trim();
+      if (q) setError(form, '_captcha', qBad ? 'Please answer the question.' : '');
+      if (!validate(form, keysIn(form, form)) || qBad) {
+        if (qBad && !form.querySelector('.has-error [name^="fields["]')) { q.focus(); return; }
         var bad = form.querySelector('.has-error [name^="fields["], [aria-invalid="true"]');
         if (bad && form._sfShowStep) { var m = bad.name && bad.name.match(/^fields\[([^\]]+)\]/); if (m) { form._sfShowStep(m[1]); bad.focus(); } }
         return;
@@ -238,9 +243,29 @@
       form.classList.remove('form-state-success', 'form-state-error');
       form.classList.add('is-sending');
       if (btn) btn.disabled = true;
+      // reCAPTCHA v3: fetch a fresh token right before sending.
+      var rc = form.querySelector('[data-sf-recaptcha]');
+      if (rc) {
+        if (!window.grecaptcha || !window.grecaptcha.execute) { setError(form, '_captcha', 'The spam check is still loading. Please try again in a moment.'); form.classList.remove('is-sending'); if (btn) btn.disabled = false; return; }
+        window.grecaptcha.ready(function () {
+          window.grecaptcha.execute(rc.getAttribute('data-sf-recaptcha'), { action: 'submit' }).then(function (token) { rc.value = token; send(); },
+            function () { setError(form, '_captcha', 'The spam check could not run. Please try again.'); form.classList.remove('is-sending'); if (btn) btn.disabled = false; });
+        });
+        return;
+      }
+      send();
+    });
+    // Third-party checks give one-time tokens: ask for a new one after every answer from the server.
+    function resetCaptcha() {
+      var t = form.querySelector('.cf-turnstile');
+      if (t && window.turnstile) { try { window.turnstile.reset(t); } catch (x) {} }
+      if (form.querySelector('.h-captcha') && window.hcaptcha) { try { window.hcaptcha.reset(); } catch (x) {} }
+    }
+    function send() {
       fetch(form.action, { method: 'POST', body: new FormData(form), headers: { Accept: 'application/json' }, credentials: 'same-origin' })
         .then(function (r) { return r.json().catch(function () { return { ok: false }; }); })
         .then(function (res) {
+          resetCaptcha();
           if (res.ok) {
             if (res.redirect) { location.href = res.redirect; return; }
             form.reset();
@@ -255,7 +280,7 @@
           var fieldErrors = res.errors && typeof res.errors === 'object' ? Object.keys(res.errors) : [];
           fieldErrors.forEach(function (k) { setError(form, k, res.errors[k]); });
           if (fieldErrors.length) {
-            var first = controls(form, fieldErrors[0])[0];
+            var first = fieldErrors[0] === '_captcha' ? form.querySelector('input[name="_captcha"]') : controls(form, fieldErrors[0])[0];
             if (form._sfShowStep) form._sfShowStep(fieldErrors[0]);
             if (first) first.focus();
           }
@@ -273,7 +298,7 @@
           if (err) { if (err.dataset.orig) err.innerHTML = err.dataset.orig; else err.textContent = MSG.network; show(err, true); }
         })
         .then(function () { form.classList.remove('is-sending'); if (btn) btn.disabled = false; });
-    });
+    }
 
     // Back from a submit without JavaScript: bring the message into view.
     var summary = form.querySelector('.slate-form__summary');

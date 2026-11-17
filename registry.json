@@ -6,7 +6,7 @@
       "slug": "slate-forms",
       "name": "Forms",
       "description": "Visual form builder (Modules › Forms) with conditional fields, file uploads, multi-step forms, validation, email notifications and confirmations, spam protection, entry limits and an inbox with stars, filters and CSV export. Place forms with the Form button in the editor, [form slug=\"…\"], {{form:slug}} or a Form custom field.",
-      "version": "2.1.0",
+      "version": "2.2.0",
       "requires": "0.13.0",
       "author": "Slate",
       "homepage": "https://github.com/narendersinghh/slate-modules/tree/main/slate-forms",
