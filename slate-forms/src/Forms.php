@@ -10,64 +10,93 @@ use Slate\Options;
 use Slate\Posts;
 
 /**
- * Forms: a "form" content type whose custom fields describe the form, a renderer for the
- * front end, a submission endpoint and the submissions store.
+ * Forms: a "form" content type whose custom fields describe the form (fields + settings), the submissions store,
+ * notification emails and the helpers shared by the builder, the renderer and the submit handler.
+ *
+ * Storage (post "fields" JSON) is the same as in 1.x, extended with optional keys, so 1.x forms keep working:
+ *   form_fields: [{id, label, type, name, placeholder, required, width, options, help,
+ *                  default, min, max, pattern, pattern_msg, accept, max_size, cond: {field, op, value, action}}]
+ *   submit_label, success_message, error_message, note, redirect_url, notify_to, email_subject, style, css_class,
+ *   confirm_enabled, confirm_subject, confirm_message, max_entries, close_at, closed_message
  */
 final class Forms
 {
     public const TYPE = 'form';
     public const ENDPOINT = '/_slate/form';
-    public const FIELD_TYPES = [
-        'text' => 'Text', 'email' => 'Email', 'tel' => 'Phone', 'url' => 'URL', 'number' => 'Number', 'textarea' => 'Paragraph',
-        'select' => 'Dropdown', 'radio' => 'Radio buttons', 'checkbox' => 'Checkboxes', 'date' => 'Date', 'consent' => 'Consent checkbox',
-        'hidden' => 'Hidden', 'html' => 'Text / HTML (no input)',
-    ];
-    public const STATUSES = ['new' => 'New', 'read' => 'Read', 'spam' => 'Spam'];
+    public const VERSION_DB = 2;
 
-    private static bool $assetsPrinted = false;
+    /** Field types: key => label. Order is the palette order in the builder. */
+    public const FIELD_TYPES = [
+        'text' => 'Short text', 'email' => 'Email', 'tel' => 'Phone', 'number' => 'Number', 'textarea' => 'Long text',
+        'select' => 'Dropdown', 'radio' => 'One choice', 'checkbox' => 'Checkboxes', 'date' => 'Date', 'time' => 'Time', 'url' => 'Website',
+        'file' => 'File upload', 'consent' => 'Consent', 'hidden' => 'Hidden', 'heading' => 'Heading', 'html' => 'Paragraph', 'step' => 'Page break',
+    ];
+    /** Types that only show something; they collect no value. */
+    public const DISPLAY_TYPES = ['html', 'heading', 'step'];
+    public const CHOICE_TYPES = ['select', 'radio', 'checkbox'];
+    public const STATUSES = ['new' => 'New', 'read' => 'Read', 'spam' => 'Spam'];
+    public const DEFAULT_UPLOAD_TYPES = 'jpg, jpeg, png, gif, webp, pdf, doc, docx, xls, xlsx, ppt, pptx, odt, ods, txt, csv, zip';
+    /** Never accepted, whatever a form allows. */
+    public const BLOCKED_EXT = ['php', 'php3', 'php4', 'php5', 'php7', 'php8', 'phtml', 'phar', 'pht', 'phps', 'cgi', 'pl', 'py', 'sh', 'bash', 'exe', 'dll',
+        'bat', 'cmd', 'com', 'msi', 'js', 'mjs', 'jsp', 'asp', 'aspx', 'html', 'htm', 'xhtml', 'shtml', 'svg', 'svgz', 'xml', 'htaccess', 'htpasswd', 'ini',
+        'jar', 'vbs', 'ps1', 'scr', 'hta', 'swf'];
 
     // ------------------------------------------------------------------ setup
 
+    /** Create / upgrade the submissions table. Cheap after the first run (one option read). */
     public static function install(): void
     {
-        if ((int)Options::get('forms_db', 0) >= 1) {
+        $v = (int)Options::get('forms_db', 0);
+        if ($v >= self::VERSION_DB) {
             return;
         }
         $sqlite = DB::$driver === 'sqlite';
-        $pk = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY';
-        $int = $sqlite ? 'INTEGER' : 'INT UNSIGNED';
-        $text = $sqlite ? 'TEXT' : 'LONGTEXT';
-        $tail = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
-        DB::exec("CREATE TABLE IF NOT EXISTS {{form_submissions}} (
-            id $pk,
-            form_id $int NULL,
-            form_title VARCHAR(191) NOT NULL DEFAULT '',
-            page_url VARCHAR(700) NOT NULL DEFAULT '',
-            page_title VARCHAR(255) NOT NULL DEFAULT '',
-            data $text NULL,
-            ip VARCHAR(45) NOT NULL DEFAULT '',
-            user_agent VARCHAR(255) NOT NULL DEFAULT '',
-            status VARCHAR(20) NOT NULL DEFAULT 'new',
-            source VARCHAR(40) NOT NULL DEFAULT 'slate',
-            created_at DATETIME NOT NULL
-        )$tail");
-        foreach (['CREATE INDEX idx_fs_form ON {{form_submissions}} (form_id, created_at)', 'CREATE INDEX idx_fs_status ON {{form_submissions}} (status, created_at)'] as $sql) {
-            try {
-                DB::exec($sql);
-            } catch (\PDOException) {
+        if ($v < 1) {
+            $pk = $sqlite ? 'INTEGER PRIMARY KEY AUTOINCREMENT' : 'INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY';
+            $int = $sqlite ? 'INTEGER' : 'INT UNSIGNED';
+            $text = $sqlite ? 'TEXT' : 'LONGTEXT';
+            $tail = $sqlite ? '' : ' ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci';
+            DB::exec("CREATE TABLE IF NOT EXISTS {{form_submissions}} (
+                id $pk,
+                form_id $int NULL,
+                form_title VARCHAR(191) NOT NULL DEFAULT '',
+                page_url VARCHAR(700) NOT NULL DEFAULT '',
+                page_title VARCHAR(255) NOT NULL DEFAULT '',
+                data $text NULL,
+                ip VARCHAR(45) NOT NULL DEFAULT '',
+                user_agent VARCHAR(255) NOT NULL DEFAULT '',
+                status VARCHAR(20) NOT NULL DEFAULT 'new',
+                source VARCHAR(40) NOT NULL DEFAULT 'slate',
+                created_at DATETIME NOT NULL
+            )$tail");
+            foreach (['CREATE INDEX idx_fs_form ON {{form_submissions}} (form_id, created_at)', 'CREATE INDEX idx_fs_status ON {{form_submissions}} (status, created_at)'] as $sql) {
+                try {
+                    DB::exec($sql);
+                } catch (\PDOException) {
+                }
             }
         }
-        Options::set('forms_db', 1);
+        // 2.0: a "starred" flag. Added, never dropped; old code simply ignores it.
+        try {
+            DB::exec('ALTER TABLE {{form_submissions}} ADD COLUMN starred ' . ($sqlite ? 'INTEGER' : 'TINYINT(1)') . ' NOT NULL DEFAULT 0');
+        } catch (\PDOException) {
+            // already there
+        }
+        Options::set('forms_db', self::VERSION_DB);
     }
 
     public static function postType(): array
     {
+        // The dashboard screens live under Modules > Forms (list, builder, entries), so the type is not in Content.
         return ['slug' => self::TYPE, 'singular' => 'Form', 'plural' => 'Forms', 'icon' => 'message', 'public' => false, 'has_archive' => false,
-            'hierarchical' => false, 'show_in_menu' => true, 'rewrite' => '', 'menu_position' => 85, 'supports' => ['title'],
+            'hierarchical' => false, 'show_in_menu' => false, 'rewrite' => '', 'menu_position' => 85, 'supports' => ['title'],
             'description' => 'Forms you can place on any page.', 'builtin' => true];
     }
 
-    /** The form builder itself is a pair of field groups on the "form" type. */
+    /**
+     * Field groups that describe the stored format (used by the API, AI tools and the generic editor).
+     * People build forms in the visual builder (Modules > Forms).
+     */
     public static function fieldGroups(): array
     {
         $types = array_map(static fn($k, $l) => "$k : $l", array_keys(self::FIELD_TYPES), self::FIELD_TYPES);
@@ -76,35 +105,35 @@ final class Forms
                 'location' => ['post_types' => [self::TYPE], 'taxonomies' => []],
                 'fields' => [[
                     'name' => 'form_fields', 'label' => 'Fields', 'type' => 'repeater', 'width' => '100', 'options' => [], 'post_type' => '',
-                    'help' => 'One row per field, in order. "Choices" (one per line, optionally value : Label) are used by Dropdown, Radio and Checkboxes. Leave "Key" empty to build it from the label.',
+                    'help' => 'Edit forms in the form builder (Modules › Forms). One row per field, in order.',
                     'sub_fields' => [
                         ['name' => 'label', 'label' => 'Label', 'type' => 'text'],
                         ['name' => 'type', 'label' => 'Type', 'type' => 'select', 'options' => $types],
                         ['name' => 'name', 'label' => 'Key', 'type' => 'text'],
                         ['name' => 'placeholder', 'label' => 'Placeholder', 'type' => 'text'],
                         ['name' => 'required', 'label' => 'Required', 'type' => 'toggle'],
-                        ['name' => 'width', 'label' => 'Width', 'type' => 'select', 'options' => ['100 : Full width', '50 : Half', '33 : One third']],
-                        ['name' => 'options', 'label' => 'Choices (one per line, value : Label) / text', 'type' => 'textarea',
-                            'show_if' => ['field' => 'type', 'in' => ['select', 'radio', 'checkbox', 'consent', 'html']]],
+                        ['name' => 'width', 'label' => 'Width', 'type' => 'select', 'options' => ['100 : Full width', '50 : Half', '33 : One third', '66 : Two thirds']],
+                        ['name' => 'options', 'label' => 'Choices (one per line, value : Label) / text', 'type' => 'textarea'],
                         ['name' => 'help', 'label' => 'Help text', 'type' => 'text'],
+                        ['name' => 'default', 'label' => 'Default value', 'type' => 'text'],
+                        ['name' => 'min', 'label' => 'Minimum', 'type' => 'text'],
+                        ['name' => 'max', 'label' => 'Maximum', 'type' => 'text'],
+                        ['name' => 'pattern', 'label' => 'Pattern', 'type' => 'text'],
                     ],
                 ]],
             ],
             'slate_form_settings' => ['id' => 'slate_form_settings', 'title' => 'Form settings', 'position' => 'side', 'system' => true,
                 'location' => ['post_types' => [self::TYPE], 'taxonomies' => []],
                 'fields' => [
-                    ['name' => 'submit_label', 'label' => 'Button text', 'type' => 'text', 'placeholder' => 'Send', 'width' => '100'],
-                    ['name' => 'success_message', 'label' => 'Success message', 'type' => 'textarea', 'placeholder' => 'Thanks! Your message has been sent.', 'width' => '100'],
-                    ['name' => 'error_message', 'label' => 'Error message', 'type' => 'textarea', 'placeholder' => 'Sorry, that didn’t go through. Please try again.', 'width' => '100'],
-                    ['name' => 'note', 'label' => 'Small print under the button', 'type' => 'textarea', 'width' => '100',
-                        'help' => 'Optional, e.g. a privacy note. Simple HTML links are allowed.'],
-                    ['name' => 'redirect_url', 'label' => 'Redirect after sending (optional)', 'type' => 'url', 'placeholder' => '/thank-you/', 'width' => '100'],
-                    ['name' => 'notify_to', 'label' => 'Email notifications to', 'type' => 'text', 'width' => '100',
-                        'help' => 'Comma-separated. Empty = the default in Forms settings (or the admin email). Write "none" to turn emails off.'],
-                    ['name' => 'email_subject', 'label' => 'Email subject', 'type' => 'text', 'placeholder' => 'New submission: {form}', 'width' => '100'],
+                    ['name' => 'submit_label', 'label' => 'Button text', 'type' => 'text', 'width' => '100'],
+                    ['name' => 'success_message', 'label' => 'Success message', 'type' => 'textarea', 'width' => '100'],
+                    ['name' => 'error_message', 'label' => 'Error message', 'type' => 'textarea', 'width' => '100'],
+                    ['name' => 'note', 'label' => 'Small print under the button', 'type' => 'textarea', 'width' => '100'],
+                    ['name' => 'redirect_url', 'label' => 'Redirect after sending', 'type' => 'url', 'width' => '100'],
+                    ['name' => 'notify_to', 'label' => 'Email notifications to', 'type' => 'text', 'width' => '100'],
+                    ['name' => 'email_subject', 'label' => 'Email subject', 'type' => 'text', 'width' => '100'],
                     ['name' => 'style', 'label' => 'Look', 'type' => 'select', 'width' => '100', 'options' => ['slate : Slate default styles', 'theme : Use the website’s own styles']],
-                    ['name' => 'css_class', 'label' => 'Extra CSS classes', 'type' => 'text', 'width' => '100',
-                        'help' => 'Place this form anywhere: the Form button in any editor, a Form custom field, {{form:this-slug}} in Templates, or [form slug="this-slug"].'],
+                    ['name' => 'css_class', 'label' => 'Extra CSS classes', 'type' => 'text', 'width' => '100'],
                 ],
             ],
         ];
@@ -112,270 +141,241 @@ final class Forms
 
     // ------------------------------------------------------------------ lookup
 
-    public static function find(string|int $ref): ?array
+    public static function find(string|int $ref, bool $published = true): ?array
     {
         $ref = trim((string)$ref);
         if ($ref === '') {
             return null;
         }
-        $form = ctype_digit($ref) ? Posts::find((int)$ref) : Posts::findBySlug(self::TYPE, $ref);
-        return $form && $form['type'] === self::TYPE && $form['status'] === 'publish' ? $form : null;
+        $form = ctype_digit($ref) ? Posts::find((int)$ref) : Posts::findBySlug(self::TYPE, $ref, $published);
+        if (!$form || $form['type'] !== self::TYPE) {
+            return null;
+        }
+        return !$published || $form['status'] === 'publish' ? $form : null;
     }
 
-    /** Normalised field list of a form. */
+    /** Builder URL of a form (or of a new one). */
+    public static function editUrl(?int $id = null): string
+    {
+        return admin_url('m/form-edit') . ($id ? '?id=' . $id : '');
+    }
+
+    /** Key as 1.x derived it (kept bug for bug: the label is not lower-cased first), so stored entries keep matching. */
+    private static function legacyKey(array $row, int $i): string
+    {
+        $label = trim((string)($row['label'] ?? ''));
+        $key = strtolower(trim((string)($row['name'] ?? '')));
+        $key = preg_replace('/[^a-z0-9_-]+/', '_', $key !== '' ? $key : ($label !== '' ? $label : 'field_' . ($i + 1)));
+        return trim((string)$key, '_') ?: 'field_' . ($i + 1);
+    }
+
+    /** A clean key for a new field ("Your name" => "your_name"). */
+    public static function keyFor(string $label, array $taken = []): string
+    {
+        $key = trim((string)preg_replace('/[^a-z0-9_]+/', '_', strtolower(slugify($label, '_'))), '_');
+        $key = $key === '' ? 'field' : substr($key, 0, 40);
+        $base = $key;
+        for ($n = 2; in_array($key, $taken, true); $n++) {
+            $key = $base . '_' . $n;
+        }
+        return $key;
+    }
+
+    /** "value : Label" lines => [value => label]. */
+    public static function parseChoices(string $text): array
+    {
+        $choices = [];
+        foreach (preg_split('/\R/', $text) ?: [] as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            [$v, $l] = str_contains($line, ':') ? array_map('trim', explode(':', $line, 2)) : [$line, $line];
+            $choices[$v !== '' ? $v : $l] = $l !== '' ? $l : $v;
+        }
+        return $choices;
+    }
+
+    /** Normalised field list of a form (1.x rows and 2.x rows alike). */
     public static function fields(array $form): array
     {
         $out = [];
         $used = [];
-        foreach ((array)($form['fields']['form_fields'] ?? []) as $i => $row) {
+        foreach (array_values((array)($form['fields']['form_fields'] ?? [])) as $i => $row) {
             if (!is_array($row)) {
                 continue;
             }
-            $type = isset(self::FIELD_TYPES[$row['type'] ?? '']) ? (string)$row['type'] : 'text';
-            $label = trim((string)($row['label'] ?? ''));
-            $key = strtolower(trim((string)($row['name'] ?? '')));
-            $key = preg_replace('/[^a-z0-9_-]+/', '_', $key !== '' ? $key : ($label !== '' ? $label : 'field_' . ($i + 1)));
-            $key = trim((string)$key, '_') ?: 'field_' . ($i + 1);
+            $type = (string)($row['type'] ?? '');
+            $type = isset(self::FIELD_TYPES[$type]) ? $type : 'text';
+            $key = self::legacyKey($row, $i);
             while (isset($used[$key])) {
                 $key .= '_' . ($i + 1);
             }
             $used[$key] = true;
-            $choices = [];
-            if (in_array($type, ['select', 'radio', 'checkbox'], true)) {
-                foreach (preg_split('/\R/', (string)($row['options'] ?? '')) as $line) {
-                    $line = trim($line);
-                    if ($line === '') {
-                        continue;
-                    }
-                    [$v, $l] = str_contains($line, ':') ? array_map('trim', explode(':', $line, 2)) : [$line, $line];
-                    $choices[$v] = $l;
-                }
-            }
-            $out[] = ['key' => $key, 'label' => $label, 'type' => $type, 'placeholder' => (string)($row['placeholder'] ?? ''),
-                'required' => !empty($row['required']), 'width' => in_array((string)($row['width'] ?? ''), ['50', '33'], true) ? (string)$row['width'] : '100',
-                'choices' => $choices, 'text' => (string)($row['options'] ?? ''), 'help' => (string)($row['help'] ?? '')];
+            $label = trim((string)($row['label'] ?? ''));
+            $width = (string)($row['width'] ?? '');
+            $cond = is_array($row['cond'] ?? null) && trim((string)($row['cond']['field'] ?? '')) !== '' ? [
+                'field' => (string)$row['cond']['field'],
+                'op' => in_array($row['cond']['op'] ?? '', ['is', 'not', 'contains', 'empty', 'filled'], true) ? (string)$row['cond']['op'] : 'is',
+                'value' => (string)($row['cond']['value'] ?? ''),
+                'action' => ($row['cond']['action'] ?? 'show') === 'hide' ? 'hide' : 'show',
+            ] : null;
+            $accept = array_values(array_filter(array_map(static fn($x) => strtolower(trim($x, " .\t")), explode(',', (string)($row['accept'] ?? '')))));
+            $out[] = [
+                'id' => (string)($row['id'] ?? '') ?: 'f' . $i,
+                'key' => $key, 'label' => $label, 'type' => $type,
+                'placeholder' => (string)($row['placeholder'] ?? ''),
+                'required' => !empty($row['required']) && !in_array($type, self::DISPLAY_TYPES, true),
+                'width' => in_array($width, ['50', '33', '66'], true) ? $width : '100',
+                'choices' => in_array($type, self::CHOICE_TYPES, true) ? self::parseChoices((string)($row['options'] ?? '')) : [],
+                'text' => (string)($row['options'] ?? ''), 'help' => (string)($row['help'] ?? ''),
+                'default' => (string)($row['default'] ?? ''),
+                'min' => trim((string)($row['min'] ?? '')), 'max' => trim((string)($row['max'] ?? '')),
+                'pattern' => (string)($row['pattern'] ?? ''), 'pattern_msg' => (string)($row['pattern_msg'] ?? ''),
+                'accept' => $accept, 'max_size' => max(0, (float)($row['max_size'] ?? 0)),
+                'cond' => $cond,
+            ];
         }
         return $out;
     }
 
-    // ------------------------------------------------------------------ rendering
-
-    /** CSS class map; a theme can swap these for its own (filter "form_classes"). */
-    private static function classes(array $form): array
+    /** Form settings with defaults. */
+    public static function settings(array $form): array
     {
-        $base = ['form' => 'slate-form', 'field' => 'slate-form__field', 'label' => 'slate-form__label', 'input' => 'slate-form__input',
-            'textarea' => 'slate-form__input slate-form__textarea', 'select' => 'slate-form__input slate-form__select', 'choice' => 'slate-form__choice',
-            'help' => 'slate-form__help', 'button' => 'slate-form__submit', 'success' => 'slate-form__message slate-form__success',
-            'error' => 'slate-form__message slate-form__error', 'html' => 'slate-form__text', 'note' => 'slate-form__note'];
-        $base = Hooks::filter('form_classes', $base, $form);
-        // Per-form overrides (e.g. kept from a migrated design): fields._classes = {success: "…", …}
-        foreach ((array)($form['fields']['_classes'] ?? []) as $k => $v) {
-            if (isset($base[$k]) && is_string($v)) {
-                $base[$k] = trim(($k === 'success' || $k === 'error' ? 'slate-form__message slate-form__' . $k . ' ' : '') . $v);
-            }
-        }
-        return $base;
+        $f = (array)($form['fields'] ?? []);
+        $s = static fn(string $k, string $d = ''): string => trim((string)($f[$k] ?? '')) !== '' ? trim((string)$f[$k]) : $d;
+        return [
+            'submit_label' => $s('submit_label', 'Send'),
+            'success_message' => $s('success_message', 'Thanks! Your message has been sent.'),
+            'error_message' => $s('error_message', 'Sorry, that did not go through. Please check the form and try again.'),
+            'note' => $s('note'),
+            'redirect_url' => $s('redirect_url'),
+            'notify_to' => $s('notify_to'),
+            'email_subject' => $s('email_subject', 'New entry: {form}'),
+            'style' => ($f['style'] ?? '') === 'theme' ? 'theme' : 'slate',
+            'css_class' => $s('css_class'),
+            'confirm_enabled' => !empty($f['confirm_enabled']),
+            'confirm_subject' => $s('confirm_subject', 'We received your message'),
+            'confirm_message' => $s('confirm_message', "Hi,\n\nThanks for getting in touch. We received your message and will get back to you soon.\n\n{all_fields}\n\n{site}"),
+            'max_entries' => max(0, (int)($f['max_entries'] ?? 0)),
+            'close_at' => $s('close_at'),
+            'closed_message' => $s('closed_message', 'This form is closed and no longer accepts entries.'),
+            'next_label' => $s('next_label', 'Next'),
+            'back_label' => $s('back_label', 'Back'),
+        ];
     }
 
-    public static function render(string|int $ref): string
+    /** Why the form does not accept entries right now, or null when it is open. */
+    public static function closedReason(array $form): ?string
     {
-        $form = self::find($ref);
-        if (!$form) {
-            return Auth::can('edit_posts') ? '<p class="slate-form-missing">[Form “' . e((string)$ref) . '” not found or not published]</p>' : '';
-        }
-        $f = $form['fields'];
-        $c = self::classes($form);
-        $style = ($f['style'] ?? '') === 'theme' ? 'theme' : 'slate';
-        $uid = 'sf' . $form['id'] . '-' . substr(bin2hex(random_bytes(3)), 0, 5);
-        $h = '<form id="' . $uid . '" class="' . e(trim($c['form'] . ' slate-form--' . $style . ' slate-form--' . $form['slug'] . ' ' . ($f['css_class'] ?? '')))
-            . '" method="post" action="' . e(url(ltrim(self::ENDPOINT, '/'))) . '" data-slate-form="' . (int)$form['id'] . '" aria-label="' . e($form['title']) . '"'
-            . (!empty($f['redirect_url']) ? ' data-redirect="' . e((string)$f['redirect_url']) . '"' : '') . '>';
-        // Theme look: label + control are direct children of the form (as in the original design, whose CSS
-        // may position them with :nth-child), so no wrappers and the technical inputs go last.
-        $flat = $style === 'theme';
-        $tail = '';
-        foreach (self::fields($form) as $fd) {
-            $id = $uid . '-' . $fd['key'];
-            $name = 'fields[' . $fd['key'] . ']';
-            $req = $fd['required'] ? ' required' : '';
-            $ph = $fd['placeholder'] !== '' ? ' placeholder="' . e($fd['placeholder']) . '"' : '';
-            $label = e($fd['label']) . ($fd['required'] && $style === 'slate' ? ' <span class="slate-form__req" aria-hidden="true">*</span>' : '');
-            if ($fd['type'] === 'hidden') {
-                $tail .= '<input type="hidden" name="' . e($name) . '" value="' . e($fd['placeholder']) . '">';
-                continue;
+        $st = self::settings($form);
+        if ($st['close_at'] !== '') {
+            $ts = 0;
+            try {
+                $tz = new \DateTimeZone((string)Options::get('timezone', 'UTC') ?: 'UTC');
+            } catch (\Throwable) {
+                $tz = new \DateTimeZone('UTC');
             }
-            if (!$flat) {
-                $h .= '<div class="' . e($c['field'] . ' slate-form__field--' . $fd['type']) . '" style="--sf-w:' . $fd['width'] . '%">';
+            try {
+                // A date alone closes the form at the end of that day (site time zone).
+                $ts = (new \DateTimeImmutable($st['close_at'] . (strlen($st['close_at']) <= 10 ? ' 23:59:59' : ''), $tz))->getTimestamp();
+            } catch (\Throwable) {
             }
-            switch ($fd['type']) {
-                case 'html':
-                    $h .= '<div class="' . e($c['html']) . '">' . \Slate\Sanitizer::html($fd['text'] !== '' ? $fd['text'] : $fd['label']) . '</div>';
-                    break;
-                case 'textarea':
-                    $h .= '<label class="' . e($c['label']) . '" for="' . $id . '">' . $label . '</label><textarea class="' . e($c['textarea']) . '" id="' . $id . '" name="' . e($name) . '" rows="5"' . $ph . $req . '></textarea>';
-                    break;
-                case 'select':
-                    $h .= '<label class="' . e($c['label']) . '" for="' . $id . '">' . $label . '</label><select class="' . e($c['select']) . '" id="' . $id . '" name="' . e($name) . '"' . $req . '>';
-                    $h .= $fd['placeholder'] !== '' ? '<option value="">' . e($fd['placeholder']) . '</option>' : '';
-                    foreach ($fd['choices'] as $v => $l) {
-                        $h .= '<option value="' . e((string)$v) . '">' . e($l) . '</option>';
-                    }
-                    $h .= '</select>';
-                    break;
-                case 'radio':
-                case 'checkbox':
-                    $h .= '<fieldset class="slate-form__group"><legend class="' . e($c['label']) . '">' . $label . '</legend>';
-                    foreach ($fd['choices'] as $v => $l) {
-                        $h .= '<label class="' . e($c['choice']) . '"><input type="' . $fd['type'] . '" name="' . e($name) . ($fd['type'] === 'checkbox' ? '[]' : '') . '" value="' . e((string)$v) . '"'
-                            . ($fd['type'] === 'radio' ? $req : '') . '> ' . e($l) . '</label>';
-                    }
-                    $h .= '</fieldset>';
-                    break;
-                case 'consent':
-                    $h .= '<label class="' . e($c['choice']) . '"><input type="checkbox" name="' . e($name) . '" value="yes"' . $req . '> ' . ($fd['text'] !== '' ? \Slate\Sanitizer::html($fd['text']) : e($fd['label'])) . '</label>';
-                    break;
-                default:
-                    $auto = ['email' => 'email', 'tel' => 'tel', 'url' => 'url'][$fd['type']] ?? (preg_match('/\bname\b/i', $fd['label']) ? 'name' : 'on');
-                    $h .= '<label class="' . e($c['label']) . '" for="' . $id . '">' . $label . '</label><input class="' . e($c['input']) . '" type="' . e($fd['type']) . '" id="' . $id . '" name="' . e($name) . '" autocomplete="' . $auto . '"' . $ph . $req . '>';
-            }
-            if ($fd['help'] !== '' && $fd['type'] !== 'html') {
-                $h .= '<small class="' . e($c['help']) . '">' . e($fd['help']) . '</small>';
-            }
-            if (!$flat) {
-                $h .= '</div>';
+            if ($ts && time() > $ts) {
+                return $st['closed_message'];
             }
         }
-        $h .= '<button class="' . e($c['button']) . '" type="submit">' . e(trim((string)($f['submit_label'] ?? '')) ?: 'Send') . '</button>';
-        if (trim((string)($f['note'] ?? '')) !== '') {
-            $h .= '<p class="' . e($c['note']) . '">' . \Slate\Sanitizer::html((string)$f['note']) . '</p>';
+        if ($st['max_entries'] > 0 && self::entryCount((int)$form['id']) >= $st['max_entries']) {
+            return $st['closed_message'];
         }
-        $msg = static fn(string $v, string $d) => \Slate\Sanitizer::html(nl2br(trim($v) !== '' ? $v : $d, false));
-        $h .= '<div class="' . e($c['success']) . '" role="status" aria-live="polite" tabindex="-1" hidden>' . $msg((string)($f['success_message'] ?? ''), 'Thanks! Your message has been sent.') . '</div>';
-        $h .= '<div class="' . e($c['error']) . '" role="alert" tabindex="-1" hidden>' . $msg((string)($f['error_message'] ?? ''), 'Sorry, that didn’t go through. Please try again.') . '</div>';
-        $h .= $tail . '<input type="hidden" name="_form" value="' . (int)$form['id'] . '"><input type="hidden" name="_page" value=""><input type="hidden" name="_title" value=""><input type="hidden" name="_js" value="">'
-            . '<div class="slate-form__hp" aria-hidden="true"><label>Leave this empty <input type="text" name="_hp" tabindex="-1" autocomplete="off"></label></div>';
-        $h .= '</form>';
-        return $h . self::assets();
+        return null;
     }
 
-    /** Small stylesheet + script, printed once per page. */
-    private static function assets(): string
+    /** Entries (not spam) received by a form. */
+    public static function entryCount(int $formId): int
     {
-        if (self::$assetsPrinted) {
-            return '';
-        }
-        self::$assetsPrinted = true;
-        $dir = SLATE_MODULES . '/slate-forms/assets/';
-        $v = substr(md5((string)@filemtime($dir . 'forms.js') . @filemtime($dir . 'forms.css')), 0, 8);
-        return '<link rel="stylesheet" href="' . e(url('modules/slate-forms/assets/forms.css')) . '?v=' . $v . '">'
-            . '<script src="' . e(url('modules/slate-forms/assets/forms.js')) . '?v=' . $v . '" defer></script>';
+        self::install();
+        return (int)DB::val("SELECT COUNT(*) FROM {{form_submissions}} WHERE form_id = :f AND status <> 'spam'", ['f' => $formId]);
     }
 
-    /** Replace form widgets / shortcodes in a page. */
+    /** Per-form figures: id => [total, unread, last]. One query. */
+    public static function stats(): array
+    {
+        self::install();
+        $out = [];
+        foreach (DB::all("SELECT form_id, COUNT(*) total, SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END) unread, MAX(created_at) last
+            FROM {{form_submissions}} WHERE status <> 'spam' AND form_id IS NOT NULL GROUP BY form_id") as $r) {
+            $out[(int)$r['form_id']] = ['total' => (int)$r['total'], 'unread' => (int)$r['unread'], 'last' => (string)$r['last']];
+        }
+        return $out;
+    }
+
+    // ------------------------------------------------------------------ conditions
+
+    /** Is $fd shown, given the submitted / default values (key => string|array)? Fields hidden by a rule count as empty. */
+    public static function visibility(array $fields, array $values): array
+    {
+        $shown = [];
+        foreach ($fields as $fd) {
+            $on = true;
+            if ($fd['cond']) {
+                $c = $fd['cond'];
+                $v = ($shown[$c['field']] ?? true) ? ($values[$c['field']] ?? '') : '';
+                $list = array_map(static fn($x) => mb_strtolower(trim((string)$x)), (array)$v);
+                $list = array_values(array_filter($list, static fn($x) => $x !== ''));
+                $want = mb_strtolower(trim($c['value']));
+                $met = match ($c['op']) {
+                    'not' => !in_array($want, $list, true),
+                    'contains' => $want !== '' && (bool)array_filter($list, static fn($x) => str_contains($x, $want)),
+                    'empty' => !$list,
+                    'filled' => (bool)$list,
+                    default => in_array($want, $list, true),
+                };
+                $on = $c['action'] === 'show' ? $met : !$met;
+            }
+            $shown[$fd['key']] = $on;
+        }
+        return $shown;
+    }
+
+    // ------------------------------------------------------------------ front end (see Render / Submit)
+
+    public static function render(string|int $ref, array $opts = []): string
+    {
+        return Render::form($ref, $opts);
+    }
+
+    /** Replace form widgets / shortcodes / template tags left in a page. */
     public static function replaceTokens(string $html): string
     {
-        if (!str_contains($html, 'data-slate-form-widget') && !str_contains($html, '[form ')) {
+        if (!str_contains($html, 'data-slate-form') && !str_contains($html, '[form ') && !str_contains($html, '{{form:') && !str_contains($html, '{{ form:')) {
             return $html;
         }
-        // Editor widget: <div class="slate-form-widget" data-slate-form-widget="12" …>…</div>
-        $html = (string)preg_replace_callback('#<(div|p)\b[^>]*\bdata-slate-form-widget="([\w-]+)"[^>]*>.*?</\1>#is', static fn($m) => self::render($m[2]), $html);
+        // Editor widget: <div class="slate-form-widget" data-slate-form-widget="12" …>…</div> (also usable in designed pages).
+        $html = (string)preg_replace_callback('#<(div|p|section)\b[^>]*\bdata-slate-form-widget=["\']([\w-]+)["\'][^>]*>.*?</\1>#is', static fn($m) => self::render($m[2]), $html);
         // Shortcode: [form id="12"] or [form slug="contact"] (optionally wrapped in its own paragraph).
-        return (string)preg_replace_callback('#(?:<p>\s*)?\[form\s+(?:id|slug)=["“”]?([\w-]+)["“”]?[^\]]*\](?:\s*</p>)?#i', static fn($m) => self::render($m[1]), $html);
+        $html = (string)preg_replace_callback('#(?:<p>\s*)?\[form\s+(?:id|slug)=["“”]?([\w-]+)["“”]?[^\]]*\](?:\s*</p>)?#i', static fn($m) => self::render($m[1]), $html);
+        // {{form:slug}} written straight into an imported or hand-made page (templates already turn it into a shortcode).
+        // Only as an element of its own (between tags), never inside an attribute, a meta description or JSON.
+        $html = (string)preg_replace_callback('#<p>\s*\{\{\s*form:([\w-]+)\s*\}\}\s*</p>#i', static fn($m) => self::render($m[1]), $html);
+        $html = (string)preg_replace_callback('#(?<=>)\s*\{\{\s*form:([\w-]+)\s*\}\}\s*(?=<)#i', static fn($m) => self::render($m[1]), $html);
+        // The first form of each id becomes the anchor "#sf-<id>" (where a submit without JavaScript comes back to).
+        $seen = [];
+        return (string)preg_replace_callback('#(<(?:form|div) id=")sf-(\d+)-\d+(" data-slate-form=)#', static function ($m) use (&$seen) {
+            if (isset($seen[$m[2]])) {
+                return $m[0];
+            }
+            $seen[$m[2]] = true;
+            return $m[1] . 'sf-' . $m[2] . $m[3];
+        }, $html);
     }
-
-    // ------------------------------------------------------------------ submissions
 
     public static function handleSubmit(): never
     {
-        $wantsJson = is_ajax() || !empty($_POST['_js']);
-        $reply = static function (bool $ok, string $message, int $code = 200, ?string $redirect = null) use ($wantsJson): never {
-            if ($wantsJson) {
-                json_response(['ok' => $ok, 'message' => $message, 'redirect' => $redirect], $code);
-            }
-            if ($ok && $redirect) {
-                redirect($redirect);
-            }
-            http_response_code($code);
-            header('Content-Type: text/html; charset=utf-8');
-            $back = (string)($_SERVER['HTTP_REFERER'] ?? url());
-            echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">'
-                . '<title>' . e(site_name()) . '</title><body style="font:16px/1.6 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px">'
-                . '<p>' . nl2br(e($message)) . '</p><p><a href="' . e($back) . '">Back</a></p></body>';
-            exit;
-        };
-        if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
-            $reply(false, 'Method not allowed.', 405);
-        }
-        self::install();
-        $form = self::find((string)(int)($_POST['_form'] ?? 0));
-        if (!$form) {
-            $reply(false, 'This form is no longer available.', 404);
-        }
-        $f = $form['fields'];
-        $success = trim((string)($f['success_message'] ?? '')) ?: 'Thanks! Your message has been sent.';
-        $redirect = trim((string)($f['redirect_url'] ?? '')) ?: null;
-        $ip = Auth::ip();
-
-        // Spam protection: honeypot, rate limit, and a JavaScript marker.
-        if (!empty($_POST['_hp'])) {
-            $reply(true, $success, 200, $redirect); // pretend success
-        }
-        $limit = (int)Options::get('forms_rate_limit', 15);
-        if ($limit > 0 && (int)DB::val('SELECT COUNT(*) FROM {{form_submissions}} WHERE ip = :ip AND created_at > :t', ['ip' => $ip, 't' => gmdate('Y-m-d H:i:s', time() - 3600)]) >= $limit) {
-            $reply(false, 'Too many submissions from your connection. Please try again later.', 429);
-        }
-
-        $input = (array)($_POST['fields'] ?? []);
-        $data = [];
-        $errors = [];
-        foreach (self::fields($form) as $fd) {
-            if ($fd['type'] === 'html') {
-                continue;
-            }
-            $raw = $input[$fd['key']] ?? null;
-            if ($fd['type'] === 'checkbox') {
-                $val = array_values(array_intersect(array_map('strval', (array)$raw), array_map('strval', array_keys($fd['choices']))));
-            } else {
-                $val = is_array($raw) ? '' : trim(str_replace("\0", '', (string)$raw));
-                $val = mb_substr(strip_tags($val), 0, $fd['type'] === 'textarea' ? 10000 : 1000);
-                if ($val !== '') {
-                    if ($fd['type'] === 'email' && !filter_var($val, FILTER_VALIDATE_EMAIL)) {
-                        $errors[] = ($fd['label'] ?: 'Email') . ' is not a valid email address.';
-                    } elseif ($fd['type'] === 'url' && !preg_match('#^https?://#i', $val)) {
-                        $val = 'https://' . $val;
-                    } elseif ($fd['type'] === 'number' && !is_numeric($val)) {
-                        $errors[] = ($fd['label'] ?: 'Number') . ' must be a number.';
-                    } elseif (in_array($fd['type'], ['select', 'radio'], true) && !array_key_exists($val, $fd['choices'])) {
-                        $val = '';
-                    }
-                }
-            }
-            if ($fd['required'] && ($val === '' || $val === [])) {
-                $errors[] = ($fd['label'] ?: $fd['key']) . ' is required.';
-            }
-            $data[$fd['key']] = ['label' => $fd['label'] ?: $fd['key'], 'value' => $val, 'type' => $fd['type']];
-        }
-        if ($errors) {
-            $reply(false, implode("\n", $errors), 422);
-        }
-        $page = mb_substr(\Slate\ContentModel::cleanUrl((string)($_POST['_page'] ?? ($_SERVER['HTTP_REFERER'] ?? ''))), 0, 700);
-        // Bots rarely run JavaScript; keep them reviewable under Spam (setting "forms_require_js").
-        $status = empty($_POST['_js']) && Options::get('forms_require_js', true) ? 'spam' : 'new';
-        $id = self::store($form, $data, $page, mb_substr(strip_tags((string)($_POST['_title'] ?? '')), 0, 255), $status);
-        if ($status === 'new') {
-            self::notify($form, $data, $page, $id);
-            if (class_exists(\Slate\Webhooks::class)) {
-                $fieldsOut = [];
-                foreach ($data as $k => $row) {
-                    $fieldsOut[is_string($k) ? $k : (string)($row['label'] ?? $k)] = $row['value'] ?? null;
-                }
-                \Slate\Webhooks::dispatch('form.submitted', ['submission_id' => $id, 'form' => ['id' => (int)$form['id'], 'title' => $form['title']],
-                    'page' => $page, 'fields' => $fieldsOut]);
-            }
-        }
-        Hooks::action('form_submitted', $id, $form, $data);
-        $reply(true, $success, 200, $redirect);
+        Submit::handle();
     }
+
+    // ------------------------------------------------------------------ storage
 
     public static function store(?array $form, array $data, string $page, string $pageTitle, string $status = 'new', string $source = 'slate', ?string $createdAt = null, ?string $ip = null, ?string $ua = null, ?string $formTitle = null): int
     {
@@ -394,39 +394,6 @@ final class Forms
         ]);
     }
 
-    public static function notify(array $form, array $data, string $page, int $id): void
-    {
-        $f = $form['fields'];
-        $to = trim((string)($f['notify_to'] ?? ''));
-        if (strtolower($to) === 'none') {
-            return;
-        }
-        $list = array_values(array_filter(array_map('trim', explode(',', $to !== '' ? $to : (trim((string)Options::get('forms_notify_to', '')) ?: (string)Options::get('admin_email')))), static fn($x) => filter_var($x, FILTER_VALIDATE_EMAIL)));
-        if (!$list) {
-            return;
-        }
-        $subject = str_replace(['{form}', '{site}'], [$form['title'], (string)Options::get('site_title')], trim((string)($f['email_subject'] ?? '')) ?: 'New submission: {form}');
-        $body = "New submission from “{$form['title']}”" . ($page ? " on $page" : '') . "\n\n";
-        $replyTo = '';
-        foreach ($data as $row) {
-            $v = is_array($row['value']) ? implode(', ', $row['value']) : (string)$row['value'];
-            $body .= $row['label'] . ":\n" . ($v === '' ? '-' : $v) . "\n\n";
-            if (!$replyTo && $row['type'] === 'email' && filter_var($v, FILTER_VALIDATE_EMAIL)) {
-                $replyTo = $v;
-            }
-        }
-        $body .= "View all submissions: " . admin_url('m/submissions?id=' . $id) . "\n";
-        if (class_exists(\Slate\Mailer::class)) {
-            // Slate 0.8+: one mail system for the whole site (SMTP when configured).
-            \Slate\Mailer::send($list, $subject, '<p>' . nl2br(e($body)) . '</p>', ['text' => $body, 'reply_to' => $replyTo]);
-            return;
-        }
-        $host = (string)parse_url(site_url(), PHP_URL_HOST);
-        $headers = 'From: ' . preg_replace('/[^\w .-]/u', '', (string)Options::get('site_title')) . ' <noreply@' . $host . ">\r\nContent-Type: text/plain; charset=utf-8"
-            . ($replyTo ? "\r\nReply-To: " . $replyTo : '');
-        @mail(implode(',', $list), '=?UTF-8?B?' . base64_encode($subject) . '?=', $body, $headers);
-    }
-
     /** Field => value pairs for display, whatever shape the submission was stored in. */
     public static function rows(array $submission): array
     {
@@ -434,12 +401,22 @@ final class Forms
         $out = [];
         foreach ($data as $k => $v) {
             if (is_array($v) && array_key_exists('value', $v)) {
-                $out[] = ['label' => (string)($v['label'] ?? $k), 'value' => is_array($v['value']) ? implode(', ', $v['value']) : (string)$v['value']];
+                $out[] = ['key' => (string)$k, 'label' => (string)($v['label'] ?? $k), 'type' => (string)($v['type'] ?? ''),
+                    'value' => is_array($v['value']) ? implode(', ', array_map('strval', $v['value'])) : (string)$v['value'],
+                    'file' => is_array($v['file'] ?? null) ? $v['file'] : null];
             } else {
-                $out[] = ['label' => ucfirst(str_replace(['_', '-'], ' ', (string)$k)), 'value' => is_array($v) ? implode(', ', $v) : (string)$v];
+                $out[] = ['key' => (string)$k, 'label' => ucfirst(str_replace(['_', '-'], ' ', (string)$k)), 'type' => '',
+                    'value' => is_array($v) ? implode(', ', array_map('strval', $v)) : (string)$v, 'file' => null];
             }
         }
         return $out;
+    }
+
+    /** Absolute dashboard URL that downloads an uploaded file of a submission. */
+    public static function fileUrl(int $submissionId, string $key, bool $absolute = false): string
+    {
+        $path = admin_slug() . '/m/forms/file?id=' . $submissionId . '&key=' . rawurlencode($key);
+        return $absolute ? site_url($path) : url($path);
     }
 
     public static function newCount(): int
@@ -449,5 +426,205 @@ final class Forms
         } catch (\Throwable) {
             return 0;
         }
+    }
+
+    // ------------------------------------------------------------------ uploads
+
+    /** Private folder for uploaded files: never served by the web server, never executed. */
+    public static function uploadDir(): string
+    {
+        $dir = SLATE_CONTENT . '/form-uploads';
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0755, true);
+        }
+        if (!is_file($dir . '/.htaccess')) {
+            @file_put_contents($dir . '/.htaccess', "Require all denied\nOptions -Indexes -ExecCGI\nRemoveHandler .php .phtml .phar\n<IfModule mod_php.c>\n    php_flag engine off\n</IfModule>\n");
+        }
+        return $dir;
+    }
+
+    /** Full path of a stored file, or null if the reference is not one of ours. */
+    public static function filePath(array $file): ?string
+    {
+        $rel = (string)($file['path'] ?? '');
+        if (!preg_match('#^\d{4}/\d{2}/[a-f0-9]{32}$#', $rel)) {
+            return null;
+        }
+        $path = self::uploadDir() . '/' . $rel;
+        return is_file($path) ? $path : null;
+    }
+
+    /** Delete the uploaded files of submissions (before deleting the rows). */
+    public static function deleteFiles(array $submissions): void
+    {
+        foreach ($submissions as $s) {
+            foreach (self::rows($s) as $r) {
+                if ($r['file'] && ($p = self::filePath($r['file']))) {
+                    @unlink($p);
+                }
+            }
+        }
+    }
+
+    // ------------------------------------------------------------------ email
+
+    /** First valid email address the visitor typed. */
+    public static function submitterEmail(array $data): string
+    {
+        foreach ($data as $row) {
+            $v = is_array($row) ? ($row['value'] ?? '') : $row;
+            if (is_string($v) && ($row['type'] ?? '') === 'email' && filter_var($v, FILTER_VALIDATE_EMAIL)) {
+                return $v;
+            }
+        }
+        foreach ($data as $row) {
+            $v = is_array($row) ? ($row['value'] ?? '') : $row;
+            if (is_string($v) && filter_var($v, FILTER_VALIDATE_EMAIL)) {
+                return $v;
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Replace {form} {site} {date} {page} {all_fields} and {field_key} tags. $html: escape values for HTML
+     * (and render {all_fields} as a table).
+     */
+    public static function tags(string $text, array $form, array $data, string $page = '', bool $html = false, int $submissionId = 0): string
+    {
+        $esc = static fn(string $v): string => $html ? e($v) : $v;
+        $map = ['{form}' => $esc((string)$form['title']), '{site}' => $esc((string)Options::get('site_title')), '{date}' => $esc(local_date(now(), 'M j, Y H:i')), '{page}' => $esc($page)];
+        foreach ($data as $k => $row) {
+            $v = is_array($row['value'] ?? null) ? implode(', ', $row['value']) : (string)($row['value'] ?? '');
+            $map['{' . $k . '}'] = $esc($v);
+        }
+        if (str_contains($text, '{all_fields}')) {
+            $map['{all_fields}'] = self::fieldsTable($data, $html, $submissionId);
+        }
+        return strtr($text, $map);
+    }
+
+    /** Submitted values as an HTML table or as plain text. */
+    public static function fieldsTable(array $data, bool $html, int $submissionId = 0): string
+    {
+        $out = $html ? '<table cellpadding="8" cellspacing="0" style="border-collapse:collapse;width:100%;max-width:640px;font:14px/1.5 sans-serif">' : '';
+        foreach ($data as $k => $row) {
+            $v = is_array($row['value'] ?? null) ? implode(', ', $row['value']) : (string)($row['value'] ?? '');
+            $label = (string)($row['label'] ?? $k);
+            if ($html) {
+                $cell = $v === '' ? '<span style="color:#888">-</span>' : nl2br(e($v));
+                if (!empty($row['file']) && $submissionId) {
+                    $cell = '<a href="' . e(self::fileUrl($submissionId, (string)$k, true)) . '">' . e($v) . '</a>';
+                }
+                $out .= '<tr><th align="left" valign="top" style="border-bottom:1px solid #eee;width:34%;color:#555;font-weight:600">' . e($label) . '</th>'
+                    . '<td valign="top" style="border-bottom:1px solid #eee">' . $cell . '</td></tr>';
+            } else {
+                $out .= $label . ":\n" . ($v === '' ? '-' : $v) . "\n\n";
+            }
+        }
+        return $html ? $out . '</table>' : rtrim($out);
+    }
+
+    /** Email the site team about a new entry. */
+    public static function notify(array $form, array $data, string $page, int $id): void
+    {
+        $f = (array)($form['fields'] ?? []);
+        $to = trim((string)($f['notify_to'] ?? ''));
+        if (strtolower($to) === 'none') {
+            return;
+        }
+        $list = array_values(array_filter(array_map('trim', preg_split('/[,;\s]+/', $to !== '' ? $to : (trim((string)Options::get('forms_notify_to', '')) ?: (string)Options::get('admin_email'))) ?: []),
+            static fn($x) => filter_var($x, FILTER_VALIDATE_EMAIL)));
+        if (!$list) {
+            return;
+        }
+        $subject = self::tags(trim((string)($f['email_subject'] ?? '')) ?: 'New entry: {form}', $form, $data, $page);
+        $subject = trim((string)preg_replace('/\s+/', ' ', $subject));
+        $replyTo = self::submitterEmail($data);
+        $link = site_url(admin_slug() . '/m/submissions?id=' . $id);
+        $text = "New entry from \"{$form['title']}\"" . ($page ? " on $page" : '') . "\n\n" . self::fieldsTable($data, false) . "\n\nOpen it in the dashboard: $link\n";
+        $html = '<div style="font:15px/1.6 sans-serif;color:#1f1f1f"><p>New entry from <strong>' . e((string)$form['title']) . '</strong>'
+            . ($page ? ' on <a href="' . e($page) . '">' . e($page) . '</a>' : '') . '</p>' . self::fieldsTable($data, true, $id)
+            . '<p style="margin-top:20px"><a href="' . e($link) . '" style="display:inline-block;padding:10px 16px;background:#0D0D0E;color:#fff;border-radius:8px;text-decoration:none">Open in the dashboard</a>'
+            . ($replyTo ? ' &nbsp; Reply to this email to answer ' . e($replyTo) . '.' : '') . '</p></div>';
+        self::mail($list, $subject, $html, $text, $replyTo);
+    }
+
+    /** Optional copy / thank-you email to the person who filled in the form. */
+    public static function confirm(array $form, array $data, string $page, int $id): void
+    {
+        $st = self::settings($form);
+        $to = self::submitterEmail($data);
+        if (!$st['confirm_enabled'] || $to === '') {
+            return;
+        }
+        // Files stay private: the copy lists their names only.
+        // Hidden fields are internal (campaign names and the like): not part of the visitor's copy.
+        $data = array_filter($data, static fn($row) => ($row['type'] ?? '') !== 'hidden');
+        $subject = trim((string)preg_replace('/\s+/', ' ', self::tags($st['confirm_subject'], $form, $data, $page)));
+        $text = self::tags($st['confirm_message'], $form, $data, $page);
+        $html = '<div style="font:15px/1.6 sans-serif;color:#1f1f1f">' . nl2br(self::tags(e($st['confirm_message']), $form, $data, $page, true)) . '</div>';
+        $admin = (string)Options::get('admin_email');
+        self::mail([$to], $subject, $html, $text, filter_var($admin, FILTER_VALIDATE_EMAIL) ? $admin : '');
+    }
+
+    private static function mail(array $to, string $subject, string $html, string $text, string $replyTo): void
+    {
+        if (class_exists(\Slate\Mailer::class)) {
+            \Slate\Mailer::send($to, $subject, $html, ['text' => $text, 'reply_to' => $replyTo]);
+            return;
+        }
+        $host = (string)parse_url(site_url(), PHP_URL_HOST);
+        $headers = 'From: ' . preg_replace('/[^\w .-]/u', '', (string)Options::get('site_title')) . ' <noreply@' . $host . ">\r\nContent-Type: text/plain; charset=utf-8"
+            . ($replyTo ? "\r\nReply-To: " . $replyTo : '');
+        @mail(implode(',', $to), '=?UTF-8?B?' . base64_encode($subject) . '?=', $text, $headers);
+    }
+
+    // ------------------------------------------------------------------ templates for new forms
+
+    /** Starting points offered when creating a form: key => [title, description, icon, fields]. */
+    public static function templates(): array
+    {
+        $f = static fn(string $type, string $label, array $more = []): array => $more + ['type' => $type, 'label' => $label];
+        $name = $f('text', 'Name', ['required' => '1', 'width' => '50', 'placeholder' => 'Your name']);
+        $email = $f('email', 'Email', ['required' => '1', 'width' => '50', 'placeholder' => 'you@example.com']);
+        return [
+            'blank' => ['Blank form', 'Start from nothing and add your own fields.', 'plus', []],
+            'contact' => ['Contact', 'Name, email and a message.', 'message', [$name, $email, $f('tel', 'Phone', ['width' => '50']), $f('select', 'Subject', ['width' => '50', 'placeholder' => 'Choose a topic', 'options' => "General question\nSales\nSupport"]), $f('textarea', 'Message', ['required' => '1'])]],
+            'callback' => ['Call me back', 'A short request for a phone call.', 'bell', [$name, $f('tel', 'Phone', ['required' => '1', 'width' => '50']), $f('radio', 'Best time to call', ['options' => "Morning\nAfternoon\nEvening"]), $f('textarea', 'What is it about?')]],
+            'newsletter' => ['Newsletter sign-up', 'Collect email addresses with consent.', 'mail', [$f('email', 'Email', ['required' => '1', 'placeholder' => 'you@example.com']), $f('consent', 'Consent', ['required' => '1', 'options' => 'Yes, send me the newsletter. I can unsubscribe at any time.'])]],
+            'quote' => ['Quote request', 'Project details with budget and timing.', 'briefcase', [$name, $email, $f('text', 'Company', ['width' => '50']), $f('select', 'Budget', ['width' => '50', 'placeholder' => 'Choose a range', 'options' => "Under 1,000\n1,000 to 5,000\n5,000 to 20,000\nMore than 20,000"]), $f('date', 'Ideal start date', ['width' => '50']), $f('textarea', 'Tell us about the project', ['required' => '1'])]],
+            'event' => ['Event registration', 'Sign-ups with a seat limit.', 'calendar', [$name, $email, $f('number', 'Number of guests', ['min' => '1', 'max' => '10', 'default' => '1', 'width' => '50']), $f('radio', 'Will you join the dinner?', ['options' => "Yes\nNo", 'width' => '50']), $f('textarea', 'Dietary requirements', ['cond' => ['field' => 'will_you_join_the_dinner', 'op' => 'is', 'value' => 'Yes', 'action' => 'show']])]],
+            'application' => ['Job application', 'Applicant details and a CV upload.', 'user', [$name, $email, $f('tel', 'Phone', ['width' => '50']), $f('url', 'LinkedIn or portfolio', ['width' => '50']), $f('file', 'CV', ['required' => '1', 'accept' => 'pdf, doc, docx', 'max_size' => '5']), $f('textarea', 'Why do you want to join?')]],
+            'feedback' => ['Feedback survey', 'A rating with a follow-up question.', 'star', [$f('radio', 'How would you rate us?', ['required' => '1', 'options' => "5 : Excellent\n4 : Good\n3 : Okay\n2 : Poor\n1 : Bad"]), $f('textarea', 'What could we do better?', ['cond' => ['field' => 'how_would_you_rate_us', 'op' => 'is', 'value' => '1', 'action' => 'show']]), $f('email', 'Email (optional)', ['help' => 'Only if you would like a reply.'])]],
+        ];
+    }
+
+    /** Field rows of a template with keys and ids filled in. */
+    public static function templateFields(string $key): array
+    {
+        $rows = self::templates()[$key][3] ?? [];
+        $taken = [];
+        foreach ($rows as &$r) {
+            $r['name'] = self::keyFor((string)$r['label'], $taken);
+            $taken[] = $r['name'];
+            $r['id'] = 'f' . bin2hex(random_bytes(4));
+        }
+        unset($r);
+        return $rows;
+    }
+
+    /** Create a form from a template. Returns the new id. */
+    public static function create(string $title, string $template = 'blank', string $status = 'publish'): int
+    {
+        $tpl = isset(self::templates()[$template]) ? $template : 'blank';
+        $title = trim($title) !== '' ? trim($title) : self::templates()[$tpl][0];
+        $fields = ['form_fields' => self::templateFields($tpl), 'submit_label' => $tpl === 'newsletter' ? 'Subscribe' : ($tpl === 'event' ? 'Register' : 'Send')];
+        if ($tpl === 'application') {
+            $fields['success_message'] = 'Thanks for applying! We will be in touch.';
+        }
+        $id = Posts::save(['type' => self::TYPE, 'title' => mb_substr($title, 0, 190), 'status' => $status, 'fields' => $fields]);
+        log_activity('form_created', $title);
+        return $id;
     }
 }

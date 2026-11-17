@@ -1,12 +1,13 @@
 <?php
 use Slate\AdminUi;
+use SlateModules\Forms\Admin;
 use Slate\DB;
 use SlateModules\Forms\Forms;
 use SlateModules\Forms\Inbox;
 
 $self = Inbox::url();
 
-// Old inbox addresses (?status=, ?form=, ?pg=) → the list table's parameters.
+// Old inbox addresses (?status=, ?form=, ?pg=) to the list table's parameters.
 if (!isset($_GET['id']) && ($legacy = Inbox::legacyQuery($_GET)) !== null) {
     redirect(Inbox::url($legacy));
 }
@@ -21,13 +22,14 @@ if (!isset($_GET['id'])) {
     }
 }
 
-// Page tabs (Submissions, Settings) are drawn by the dashboard for every module.
+// Page tabs (Forms, Entries, Settings) are drawn by the dashboard for every module.
+echo Admin::assets();
 
 // ---------------------------------------------------------------- one submission (?id=, also linked from notification emails)
 if (($sid = (int)($_GET['id'] ?? 0)) > 0):
     $s = DB::row('SELECT * FROM {{form_submissions}} WHERE id = :id', ['id' => $sid]);
     if (!$s) {
-        echo AdminUi::emptyState('Submission not found', 'It may have been deleted.', 'message', ['Back to submissions' => $self]);
+        echo AdminUi::emptyState('Entry not found', 'It may have been deleted.', 'inbox', ['Back to entries' => $self]);
         return;
     }
     if ($s['status'] === 'new') {
@@ -42,24 +44,24 @@ if (($sid = (int)($_GET['id'] ?? 0)) > 0):
     $older = DB::val('SELECT id FROM {{form_submissions}} WHERE id < :id ORDER BY id DESC LIMIT 1', ['id' => $sid]);
 ?>
 <div class="row-between" style="margin-bottom:16px">
-  <a class="btn btn-ghost btn-sm" href="<?= e($back) ?>"><?= icon('chevron-left', 15) ?> All submissions</a>
+  <a class="btn btn-ghost btn-sm" href="<?= e($back) ?>"><?= icon('chevron-left', 15) ?> All entries</a>
   <span>
-    <?php if ($newer): ?><a class="btn btn-sm btn-ghost" href="<?= e(Inbox::url(['id' => $newer])) ?>" title="Newer submission"><?= icon('chevron-left', 15) ?> Newer</a><?php endif; ?>
-    <?php if ($older): ?><a class="btn btn-sm btn-ghost" href="<?= e(Inbox::url(['id' => $older])) ?>" title="Older submission">Older <?= icon('chevron-right', 15) ?></a><?php endif; ?>
+    <?php if ($newer): ?><a class="btn btn-sm btn-ghost" href="<?= e(Inbox::url(['id' => $newer])) ?>" title="Newer entry"><?= icon('chevron-left', 15) ?> Newer</a><?php endif; ?>
+    <?php if ($older): ?><a class="btn btn-sm btn-ghost" href="<?= e(Inbox::url(['id' => $older])) ?>" title="Older entry">Older <?= icon('chevron-right', 15) ?></a><?php endif; ?>
   </span>
 </div>
 <div class="split split-wide">
   <section class="card">
     <div class="card-head">
-      <h2><?= e($name !== '' ? $name : ($email !== '' ? $email : $s['form_title'])) ?></h2>
+      <h2 class="sf-entry-title"><?= Inbox::starButton($s) ?> <?= e($name !== '' ? $name : ($email !== '' ? $email : 'Entry #' . (int)$s['id'])) ?></h2>
       <?= $s['status'] === 'spam' ? AdminUi::pill('Spam', 'warn') : AdminUi::pill($s['form_title']) ?>
     </div>
     <div class="card-pad">
-      <?php if (!$rows): ?><p class="muted">This submission has no fields.</p><?php endif; ?>
+      <?php if (!$rows): ?><p class="muted">This entry has no fields.</p><?php endif; ?>
       <dl class="sub-detail">
         <?php foreach ($rows as $r): ?>
           <dt><?= e($r['label']) ?></dt>
-          <dd><?php if ($r['value'] === ''): ?><span class="muted">-</span><?php elseif (filter_var($r['value'], FILTER_VALIDATE_EMAIL)): ?><a href="mailto:<?= e($r['value']) ?>"><?= e($r['value']) ?></a><?php elseif (filter_var($r['value'], FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $r['value'])): ?><a href="<?= e($r['value']) ?>" target="_blank" rel="noopener noreferrer"><?= e($r['value']) ?></a><?php else: ?><?= e($r['value']) ?><?php endif; ?></dd>
+          <dd><?php if ($r['file']): ?><a class="sf-file" href="<?= e(\SlateModules\Forms\Forms::fileUrl((int)$s['id'], $r['key'])) ?>"><?= icon('download', 15) ?> <?= e($r['value']) ?></a><?php if (!empty($r['file']['size'])): ?> <span class="muted small"><?= e(format_bytes((int)$r['file']['size'])) ?></span><?php endif; ?><?php elseif ($r['type'] === 'file' && $r['value'] !== ''): ?><?= e($r['value']) ?> <span class="muted small">(not kept: spam)</span><?php elseif ($r['value'] === ''): ?><span class="muted">-</span><?php elseif (filter_var($r['value'], FILTER_VALIDATE_EMAIL)): ?><a href="mailto:<?= e($r['value']) ?>"><?= e($r['value']) ?></a><?php elseif (filter_var($r['value'], FILTER_VALIDATE_URL) && preg_match('#^https?://#i', $r['value'])): ?><a href="<?= e($r['value']) ?>" target="_blank" rel="noopener noreferrer"><?= e($r['value']) ?></a><?php else: ?><span class="sf-pre"><?= e($r['value']) ?></span><?php endif; ?></dd>
         <?php endforeach; ?>
       </dl>
     </div>
@@ -74,11 +76,11 @@ if (($sid = (int)($_GET['id'] ?? 0)) > 0):
         <button class="btn" name="action" value="new">Mark as unread</button>
         <button class="btn" name="action" value="spam">Mark as spam</button>
       <?php endif; ?>
-      <button class="btn btn-ghost btn-danger" name="action" value="delete" data-confirm="Delete this submission permanently? This cannot be undone." onclick="this.form.return.value='<?= e($self) ?>'"><?= icon('trash', 15) ?> Delete</button>
+      <button class="btn btn-ghost btn-danger" name="action" value="delete" data-confirm="Delete this entry permanently? This cannot be undone." onclick="this.form.return.value='<?= e($self) ?>'"><?= icon('trash', 15) ?> Delete</button>
     </div></form>
     <section class="card"><div class="card-pad">
       <div class="kv">
-        <span>Form</span><span><?= $s['form_id'] ? '<a href="' . e(admin_url('content/form/' . (int)$s['form_id'])) . '">' . e($s['form_title']) . '</a>' : e($s['form_title']) ?></span>
+        <span>Form</span><span><?= $s['form_id'] ? '<a href="' . e(\SlateModules\Forms\Forms::editUrl((int)$s['form_id'])) . '">' . e($s['form_title']) . '</a>' : e($s['form_title']) ?></span>
         <span>Received</span><span><?= e(local_date($s['created_at'], 'M j, Y H:i')) ?></span>
         <?php if ($s['page_url']): ?><span>Page</span><span><a href="<?= e($s['page_url']) ?>" target="_blank" rel="noopener"><?= e($s['page_title'] ?: $s['page_url']) ?></a></span><?php endif; ?>
         <span>Status</span><span><?= e(Forms::STATUSES[$s['status']] ?? $s['status']) ?></span>

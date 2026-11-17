@@ -9,7 +9,7 @@ use Slate\ListTable;
 use Slate\Posts;
 
 /**
- * The submissions inbox in the dashboard (Modules → Forms → Submissions): list table, filters, bulk actions, CSV.
+ * The submissions inbox in the dashboard (Modules › Forms › Entries): list table, filters, bulk actions, CSV.
  */
 final class Inbox
 {
@@ -17,6 +17,7 @@ final class Inbox
     public const VIEWS = [
         'inbox' => ['Inbox', "status <> 'spam'"],
         'new' => ['Unread', "status = 'new'"],
+        'starred' => ['Starred', "starred = 1 AND status <> 'spam'"],
         'spam' => ['Spam', "status = 'spam'"],
         'all' => ['All', ''],
     ];
@@ -27,9 +28,12 @@ final class Inbox
         return admin_url('m/submissions') . ($query ? '?' . http_build_query($query) : '');
     }
 
+    private const DATES = ['today' => 'Today', '7d' => 'Last 7 days', '30d' => 'Last 30 days', '90d' => 'Last 90 days', '365d' => 'Last 12 months'];
+
     public static function table(): ListTable
     {
         $counts = array_map('intval', array_column(DB::all('SELECT status, COUNT(*) c FROM {{form_submissions}} GROUP BY status'), 'c', 'status'));
+        $counts['starred'] = (int)DB::val("SELECT COUNT(*) FROM {{form_submissions}} WHERE starred = 1 AND status <> 'spam'");
         $views = [];
         foreach (self::VIEWS as $k => [$label]) {
             $views[$k] = [$label, match ($k) {
@@ -44,11 +48,12 @@ final class Inbox
             $forms[(int)$f['id']] = ($f['title'] ?: '(no title)') . ' (' . number_format($perForm[(int)$f['id']] ?? 0) . ')';
         }
         $spamView = ($_GET['view'] ?? '') === 'spam';
-        $bulk = $spamView ? ['read' => 'Not spam'] : ['read' => 'Mark as read', 'new' => 'Mark as unread', 'spam' => 'Mark as spam'];
+        $bulk = $spamView ? ['read' => 'Not spam'] : ['read' => 'Mark as read', 'new' => 'Mark as unread', 'star' => 'Star', 'unstar' => 'Remove star', 'spam' => 'Mark as spam'];
         $bulk['delete'] = ['label' => 'Delete', 'danger' => true, 'confirm' => 'Permanently delete the selected submissions? This cannot be undone.'];
 
         $open = static fn(array $s): string => self::url(['id' => (int)$s['id']]);
         return new ListTable('forms.submissions', [
+            'star' => ['label' => 'Starred', 'class' => 'sf-star-col', 'render' => static fn(array $s): string => self::starButton($s), 'export' => static fn(array $s) => !empty($s['starred']) ? 'yes' : ''],
             'from' => ['label' => 'From', 'primary' => true, 'render' => static function (array $s) use ($open): string {
                 [$name, $email] = self::sender($s);
                 $title = $name !== '' ? $name : ($email !== '' ? $email : 'Submission #' . (int)$s['id']);
@@ -80,9 +85,9 @@ final class Inbox
                 'export' => static fn(array $s) => (string)$s['created_at']],
         ], [
             'base' => self::url(),
-            'search' => 'Search submissions…',
+            'search' => 'Search entries…',
             'views' => $views,
-            'filters' => $forms ? ['form' => ['label' => 'Forms', 'all' => 'All forms', 'options' => $forms]] : [],
+            'filters' => ($forms ? ['form' => ['label' => 'Form', 'all' => 'All forms', 'options' => $forms]] : []) + ['date' => ['label' => 'Received', 'all' => 'Any time', 'options' => self::DATES]],
             'bulk' => $bulk,
             'bulk_action' => admin_url('m/submissions/bulk'),
             'all_matching' => true,
@@ -92,7 +97,7 @@ final class Inbox
                 return '<a href="' . e($open($s)) . '">Open</a>'
                     . ($email !== '' ? '<a href="mailto:' . e($email) . '?subject=' . rawurlencode('Re: ' . $s['form_title']) . '">Reply</a>' : '');
             },
-            'empty' => ['icon' => 'message', 'title' => 'No submissions here', 'text' => 'Entries appear here as soon as a visitor sends one of your forms.'],
+            'empty' => ['icon' => 'inbox', 'title' => 'No entries here', 'text' => 'Entries appear here as soon as a visitor sends one of your forms.'],
         ]);
     }
 
@@ -110,6 +115,14 @@ final class Inbox
             $w[] = 'form_id = :form';
             $p['form'] = $form;
         }
+        $since = match ((string)($state['filters']['date'] ?? '')) {
+            'today' => gmdate('Y-m-d H:i:s', strtotime('today')), '7d' => gmdate('Y-m-d H:i:s', time() - 7 * 86400), '30d' => gmdate('Y-m-d H:i:s', time() - 30 * 86400),
+            '90d' => gmdate('Y-m-d H:i:s', time() - 90 * 86400), '365d' => gmdate('Y-m-d H:i:s', time() - 365 * 86400), default => null,
+        };
+        if ($since !== null) {
+            $w[] = 'created_at >= :since';
+            $p['since'] = $since;
+        }
         if (($q = trim((string)($state['q'] ?? ''))) !== '') {
             $w[] = '(data LIKE :q OR page_url LIKE :q2 OR form_title LIKE :q3 OR ip = :q4)';
             $p['q'] = $p['q2'] = $p['q3'] = '%' . str_replace(['%', '_'], ['\\%', '\\_'], $q) . '%';
@@ -124,7 +137,7 @@ final class Inbox
         return $col . ($state['dir'] === 'asc' ? ' ASC' : ' DESC') . ($col === 'id' ? '' : ', id DESC');
     }
 
-    /** Old inbox addresses (?status= &form= &pg=) → the list table's (?view= &f[form]= &p=). */
+    /** Old inbox addresses (?status= &form= &pg=) to the list table's (?view= &f[form]= &p=). */
     public static function legacyQuery(array $get): ?array
     {
         if (!isset($get['status']) && !isset($get['form']) && !isset($get['pg'])) {
@@ -142,7 +155,7 @@ final class Inbox
     /** Apply a bulk action; returns the number of submissions changed. */
     public static function apply(string $action, array $ids, ?array $state = null): int
     {
-        if (!in_array($action, ['read', 'new', 'spam', 'delete'], true)) {
+        if (!in_array($action, ['read', 'new', 'spam', 'delete', 'star', 'unstar'], true)) {
             return 0;
         }
         if ($state !== null) {
@@ -160,7 +173,10 @@ final class Inbox
             return 0;
         }
         if ($action === 'delete') {
+            Forms::deleteFiles(DB::all("SELECT id, data FROM {{form_submissions}} $where", $params));
             DB::query("DELETE FROM {{form_submissions}} $where", $params);
+        } elseif ($action === 'star' || $action === 'unstar') {
+            DB::query("UPDATE {{form_submissions}} SET starred = :sv $where", $params + ['sv' => $action === 'star' ? 1 : 0]);
         } else {
             DB::query("UPDATE {{form_submissions}} SET status = :st $where", $params + ['st' => $action]);
         }
@@ -239,12 +255,21 @@ final class Inbox
         return $out;
     }
 
+    /** Star toggle (the module script posts it; lists sit inside the bulk form, so no nested forms). */
+    public static function starButton(array $s): string
+    {
+        $on = !empty($s['starred']);
+        return '<button type="button" class="sf-star' . ($on ? ' is-on' : '') . '" data-sf-star="' . (int)$s['id'] . '" title="Star" aria-label="Star" aria-pressed="' . ($on ? 'true' : 'false') . '">'
+            . icon('star', 16) . '</button>';
+    }
+
     /** Daily clean-up: delete spam older than the "forms_spam_days" setting (0 = keep). */
     public static function purgeSpam(): void
     {
         $days = (int)\Slate\Options::get('forms_spam_days', 0);
         if ($days > 0) {
             Forms::install();
+            Forms::deleteFiles(DB::all("SELECT id, data FROM {{form_submissions}} WHERE status = 'spam' AND created_at < :t", ['t' => gmdate('Y-m-d H:i:s', time() - $days * 86400)]));
             DB::query("DELETE FROM {{form_submissions}} WHERE status = 'spam' AND created_at < :t", ['t' => gmdate('Y-m-d H:i:s', time() - $days * 86400)]);
         }
     }
