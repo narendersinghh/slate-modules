@@ -240,7 +240,7 @@ final class Translations
     /** Read-only summary of the edited item's translations (shown under the language select). */
     private static function editorHelp(): string
     {
-        $base = 'Create and link translations under Multilingual → Translations.';
+        $base = 'Create and link translations under Multilingual › Translations.';
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'GET'
             || !preg_match('#^/' . preg_quote(admin_slug(), '#') . '/content/[a-z0-9_-]+/(\d+)$#', App::path(), $m)) {
             return $base;
@@ -281,7 +281,7 @@ final class Translations
         if (!is_array($fields)) {
             return $row;
         }
-        // Store codes exactly as configured ("ES " → "es") so SQL filters match them.
+        // Store codes exactly as configured ("ES " › "es") so SQL filters match them.
         if (isset($fields[self::LANG]) && is_string($fields[self::LANG])) {
             $clean = strtolower(trim($fields[self::LANG]));
             if ($clean !== $fields[self::LANG] && Languages::get($clean) !== null) {

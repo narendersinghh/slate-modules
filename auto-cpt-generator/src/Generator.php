@@ -28,7 +28,7 @@ final class Generator
         'jet-engine', 'jet-menu', 'oceanwp_library', 'astra-advanced-hook', 'wpforms', 'wp_router_page', 'ct_template'];
     public const SKIP_TAXES = ['nav_menu', 'link_category', 'post_format', 'wp_theme', 'wp_template_part_area', 'elementor_library_type',
         'elementor_library_category', 'wp_pattern_category', 'product_visibility', 'product_shipping_class', 'elementor_font_type', 'wp_font_family'];
-    /** WordPress → Slate built-in equivalents. */
+    /** WordPress › Slate built-in equivalents. */
     public const TYPE_ALIASES = ['post' => 'post', 'page' => 'page', 'e-landing-page' => 'page'];
     public const TAX_ALIASES = ['category' => 'category', 'post_tag' => 'tag'];
 
@@ -237,7 +237,7 @@ final class Generator
             }
             array_pop($parts);
             if (!empty($t['parent'])) {
-                // A child whose URL has no extra segment compared to the base → flat URLs.
+                // A child whose URL has no extra segment compared to the base › flat URLs.
                 if ($base !== null) {
                     $nested = count($parts) > count(array_filter(explode('/', $base), 'strlen'));
                 }
@@ -325,7 +325,7 @@ final class Generator
     public static function fromDescription(string $description): array
     {
         if (!Ai::enabled()) {
-            throw new \RuntimeException('Enable and configure AI under Settings → AI first.');
+            throw new \RuntimeException('Enable and configure AI under Settings › AI first.');
         }
         $types = implode(', ', array_keys(ContentModel::FIELD_TYPES));
         $prompt = "Design a CMS content model for this website:\n\"\"\"\n$description\n\"\"\"\n\n"
@@ -417,7 +417,7 @@ final class Generator
             if ($existing) {
                 $merged = array_values(array_unique(array_merge($existing['post_types'], $pts)));
                 ContentModel::saveTaxonomy(array_merge($existing, ['post_types' => $merged, 'rewrite' => $rewrite, 'nested' => (bool)($x['nested'] ?? ($existing['nested'] ?? true))]));
-                $log[] = "Updated taxonomy “{$existing['plural']}” → " . implode(', ', $merged) . ' (/' . $rewrite . ($rewrite !== '' ? '/' : '') . '…)';
+                $log[] = "Updated taxonomy “{$existing['plural']}”: " . implode(', ', $merged) . ' (/' . $rewrite . ($rewrite !== '' ? '/' : '') . '…)';
                 continue;
             }
             ContentModel::saveTaxonomy(['slug' => $slug, 'singular' => strip_tags($x['singular']), 'plural' => strip_tags($x['plural']), 'post_types' => $pts,

@@ -69,7 +69,7 @@ $existing = [
     <div class="card-pad stack">
       <div class="choice-grid">
         <label class="choice-card"><input type="radio" name="acg_src" value="wp" checked><span>Live WordPress site<br><small class="muted">Reads its post types, taxonomies and ACF fields.</small></span></label>
-        <label class="choice-card"><input type="radio" name="acg_src" value="wxr"><span>WordPress export file<br><small class="muted">A .xml file from Tools → Export.</small></span></label>
+        <label class="choice-card"><input type="radio" name="acg_src" value="wxr"><span>WordPress export file<br><small class="muted">A .xml file from Tools › Export.</small></span></label>
         <label class="choice-card"><input type="radio" name="acg_src" value="ai"><span>Describe it<br><small class="muted">Plain English; AI designs the model.</small></span></label>
         <label class="choice-card"><input type="radio" name="acg_src" value="json"><span>JSON spec<br><small class="muted">Paste a spec you already have.</small></span></label>
       </div>
@@ -85,13 +85,13 @@ $existing = [
 
       <div data-panel="wxr" class="stack-sm" hidden>
         <label class="field"><span>Export file</span><input class="input" type="file" accept=".xml" data-file></label>
-        <small class="help">In WordPress: <strong>Tools → Export → All content</strong>. Every post type, taxonomy and ACF field is detected, including repeaters.</small>
+        <small class="help">In WordPress: <strong>Tools › Export › All content</strong>. Every post type, taxonomy and ACF field is detected, including repeaters.</small>
       </div>
 
       <div data-panel="ai" class="stack-sm" hidden>
         <label class="field"><span>What is the site about?</span>
           <textarea class="input" rows="4" data-in="description" placeholder="A real-estate agency: property listings with price, bedrooms, bathrooms, area, gallery and location; agents with phone and email; neighbourhood guides."></textarea></label>
-        <?php if (!Ai::enabled()): ?><div class="alert">Set up an AI provider under <a href="<?= e(admin_url('settings/ai/provider')) ?>">Settings → AI</a> to use this.</div><?php endif; ?>
+        <?php if (!Ai::enabled()): ?><div class="alert">Set up an AI provider under <a href="<?= e(admin_url('settings/ai/provider')) ?>">Settings › AI</a> to use this.</div><?php endif; ?>
       </div>
 
       <div data-panel="json" class="stack-sm" hidden>

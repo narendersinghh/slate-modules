@@ -7,7 +7,7 @@ use Slate\Options;
 use Slate\Session;
 
 /**
- * Shop settings, declared for core's settings screen (Settings → Modules → Shop). Each value is its own option
+ * Shop settings, declared for core's settings screen (Settings › Modules › Shop). Each value is its own option
  * ("shop_currency", "shop_stripe_test_secret", …); secrets are stored encrypted by core (Crypto), as before.
  */
 final class Settings
@@ -66,7 +66,7 @@ final class Settings
             ['key' => $k('stripe_mode'), 'type' => 'select', 'label' => 'Stripe mode', 'default' => $d['stripe_mode'], 'options' => $mode, 'show_if' => $k('stripe_enabled') . '=1'],
             ['key' => $k('stripe_title'), 'type' => 'text', 'label' => 'Name at checkout', 'default' => $d['stripe_title'], 'show_if' => $k('stripe_enabled') . '=1'],
         ];
-        foreach (['stripe_test_secret' => 'Stripe → Developers → API keys. Starts with sk_test_ (or rk_test_).', 'stripe_test_webhook' => 'Starts with whsec_.',
+        foreach (['stripe_test_secret' => 'Stripe › Developers › API keys. Starts with sk_test_ (or rk_test_).', 'stripe_test_webhook' => 'Starts with whsec_.',
             'stripe_live_secret' => 'Starts with sk_live_ (or rk_live_).', 'stripe_live_webhook' => 'Starts with whsec_.'] as $s => $help) {
             $fields[] = ['key' => $k($s), 'type' => 'secret', 'label' => 'Stripe ' . lcfirst(Shop::SECRET_KEYS[$s]), 'default' => '', 'help' => $help,
                 'show_if' => $k('stripe_enabled') . '=1'];
@@ -79,7 +79,7 @@ final class Settings
         foreach (['test', 'live'] as $m) {
             $fields[] = ['key' => $k("razorpay_{$m}_key_id"), 'type' => 'text', 'label' => 'Razorpay ' . $m . ' key id', 'default' => '', 'placeholder' => "rzp_{$m}_…",
                 'pattern' => "^rzp_{$m}_[A-Za-z0-9]+$", 'show_if' => $k('razorpay_enabled') . '=1',
-                'help' => $m === 'test' ? 'Razorpay Dashboard → Account & Settings → API keys.' : ''];
+                'help' => $m === 'test' ? 'Razorpay Dashboard › Account & Settings › API keys.' : ''];
             $fields[] = ['key' => $k("razorpay_{$m}_key_secret"), 'type' => 'secret', 'label' => 'Razorpay ' . $m . ' key secret', 'default' => '',
                 'show_if' => $k('razorpay_enabled') . '=1'];
             $fields[] = ['key' => $k("razorpay_{$m}_webhook"), 'type' => 'secret', 'label' => 'Razorpay ' . $m . ' webhook secret', 'default' => '',
@@ -120,9 +120,9 @@ final class Settings
       <span>Stripe</span><code style="user-select:all"><?= e(Shop::webhookUrl('stripe')) ?></code>
       <span>Razorpay</span><code style="user-select:all"><?= e(Shop::webhookUrl('razorpay')) ?></code>
     </div>
-    <p class="muted small">Stripe → Developers → Webhooks: add the URL with the events <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>
+    <p class="muted small">Stripe › Developers › Webhooks: add the URL with the events <code>checkout.session.completed</code>, <code>checkout.session.async_payment_succeeded</code>
       and <code>checkout.session.async_payment_failed</code>, then paste its signing secret above (once for test, once for live).
-      Razorpay → Account &amp; Settings → Webhooks: add the URL with a secret of your choice and the events <code>order.paid</code>, <code>payment.captured</code> and
+      Razorpay › Account &amp; Settings › Webhooks: add the URL with a secret of your choice and the events <code>order.paid</code>, <code>payment.captured</code> and
       <code>payment.failed</code>. Razorpay’s checkout script loads from checkout.razorpay.com; allow it in a strict Content-Security-Policy.</p>
   </div>
 </section>

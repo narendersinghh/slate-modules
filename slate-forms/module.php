@@ -1,6 +1,6 @@
 <?php
 /**
- * Forms, form builder (Content → Forms), Form widget / field / template tag, submissions inbox.
+ * Forms, form builder (Content › Forms), Form widget / field / template tag, submissions inbox.
  */
 declare(strict_types=1);
 
@@ -50,7 +50,7 @@ Modules::adminPage('Submissions', 'submissions', static function (): void {
 
 Modules::settings([
     ['type' => 'heading', 'label' => 'Email notifications'],
-    ['key' => 'forms_notify_to', 'type' => 'text', 'label' => 'Send new submissions to', 'default' => '', 'placeholder' => 'Admin email (Settings → General)',
+    ['key' => 'forms_notify_to', 'type' => 'text', 'label' => 'Send new submissions to', 'default' => '', 'placeholder' => 'Admin email (Settings › General)',
         'help' => 'Comma-separated addresses, used by every form that has no recipients of its own. Empty = the admin email.'],
     ['type' => 'heading', 'label' => 'Spam protection', 'help' => 'Every form also has a hidden honeypot field that bots fill in; those entries are dropped silently.'],
     ['key' => 'forms_require_js', 'type' => 'toggle', 'label' => 'Send entries from browsers without JavaScript to Spam', 'default' => true,

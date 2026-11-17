@@ -251,11 +251,11 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
           <label class="field"><span>Administrator username</span><input class="input" data-in="user" value="<?= e($conn['user'] ?? '') ?>" autocomplete="off"></label>
           <label class="field"><span>Application password</span><input class="input" type="password" data-in="password" autocomplete="new-password" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"></label>
         </div>
-        <small class="help">In WordPress go to <strong>Users → Profile → Application Passwords</strong>, add one named “Slate” and paste it here. Never use your login password. Without it only public content is read.</small>
+        <small class="help">In WordPress go to <strong>Users › Profile › Application Passwords</strong>, add one named “Slate” and paste it here. Never use your login password. Without it only public content is read.</small>
       </div>
       <div data-src-panel="wxr" class="stack-sm"<?= $src === 'wxr' ? '' : ' hidden' ?>>
         <label class="field"><span>Export file</span><input class="input" type="file" accept=".xml" data-file></label>
-        <small class="help">In WordPress: <strong>Tools → Export → All content</strong>. Keep the old site online during the import so media can be downloaded.</small>
+        <small class="help">In WordPress: <strong>Tools › Export › All content</strong>. Keep the old site online during the import so media can be downloaded.</small>
       </div>
     </div>
     <div class="card-foot row-between">
@@ -397,7 +397,7 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
             <?php if (!empty($stats['media'])): ?><a class="btn" href="<?= e(admin_url('media')) ?>">Media</a><?php endif; ?>
             <?php if (!empty($stats['menus'])): ?><a class="btn" href="<?= e(admin_url('settings/appearance/menus')) ?>">Menus</a><?php endif; ?>
             <?php if (!empty($job['opts']['redirects'])): ?><a class="btn" href="<?= e(admin_url('settings/seo/redirects')) ?>">Redirects</a><?php endif; ?>
-            <a class="btn" href="<?= e($base . '?tab=items') ?>">Old → new addresses</a>
+            <a class="btn" href="<?= e($base . '?tab=items') ?>">Old and new addresses</a>
           </div>
         </div>
       <?php endif; ?>

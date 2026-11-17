@@ -300,7 +300,7 @@ final class Forms
             $back = (string)($_SERVER['HTTP_REFERER'] ?? url());
             echo '<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex">'
                 . '<title>' . e(site_name()) . '</title><body style="font:16px/1.6 system-ui,sans-serif;max-width:560px;margin:15vh auto;padding:0 20px">'
-                . '<p>' . nl2br(e($message)) . '</p><p><a href="' . e($back) . '">← Back</a></p></body>';
+                . '<p>' . nl2br(e($message)) . '</p><p><a href="' . e($back) . '">Back</a></p></body>';
             exit;
         };
         if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {

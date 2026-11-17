@@ -9,7 +9,7 @@ use Slate\Modules;
 use Slate\Options;
 
 /**
- * Module settings. Each setting is its own option "comments_<key>" (edited at Settings → Modules → Comments).
+ * Module settings. Each setting is its own option "comments_<key>" (edited at Settings › Modules › Comments).
  * Before 1.1.0 they were stored together in the array option "comments_settings": migrations/002-settings.php copies
  * those values over, and until it has run they are still read as a fallback.
  */
@@ -74,7 +74,7 @@ final class Config
 
     // ------------------------------------------------------------------ settings screen
 
-    /** Declare the settings screen (Settings → Modules → Comments). */
+    /** Declare the settings screen (Settings › Modules › Comments). */
     public static function register(): void
     {
         $p = self::PREFIX;
@@ -100,7 +100,7 @@ final class Config
 
             ['type' => 'heading', 'label' => 'Notifications & API'],
             ['key' => $p . 'notify_email', 'type' => 'email', 'label' => 'Email new comments to', 'default' => $d['notify_email'], 'placeholder' => 'Leave empty for no emails',
-                'help' => 'Spam is never emailed. The comment.created webhook event fires too (Settings → Integrations → Webhooks).'],
+                'help' => 'Spam is never emailed. The comment.created webhook event fires too (Settings › Integrations › Webhooks).'],
             ['key' => $p . 'api_count', 'type' => 'toggle', 'label' => 'Add comments_count to REST API items', 'default' => $d['api_count'],
                 'help' => 'Approved comments are also listed at /api/v1/comments/{id} (names, websites and text only, never emails or IP addresses).'],
         ], ['help' => 'Where comments appear, how they are moderated and who is told about them.', 'cap' => 'manage_settings', 'render' => [self::class, 'renderTypes']]);
