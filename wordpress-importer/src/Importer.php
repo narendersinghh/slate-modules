@@ -1472,7 +1472,7 @@ final class Importer
             $this->stat('menus');
             $this->rep('menus', 'imported');
             $this->rep('menus', 'items', count($m['items']));
-            $this->item('menus', $m['name'], '', admin_url('settings/appearance/menus'), $loc !== '' ? 'Shown in the “' . $loc . '” place of the theme.' : 'Not assigned to a place in the theme yet' . ($m['wp_location'] !== '' && $m['wp_location'] !== $m['name'] ? ' (was “' . $m['wp_location'] . '” in WordPress).' : '.'));
+            $this->item('menus', $m['name'], '', admin_url('design/menus'), $loc !== '' ? 'Shown in the “' . $loc . '” place of the theme.' : 'Not assigned to a place in the theme yet' . ($m['wp_location'] !== '' && $m['wp_location'] !== $m['name'] ? ' (was “' . $m['wp_location'] . '” in WordPress).' : '.'));
         }
         if ($out) {
             $existing = array_filter(Menus::all(), static fn($m) => !str_starts_with((string)$m['id'], 'wp-'));

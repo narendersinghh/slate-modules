@@ -491,8 +491,8 @@ $reach = ['source' => true, 'analyse' => (bool)$scan, 'choose' => (bool)$scan, '
           <a class="btn" href="<?= e(admin_url('content/' . $slug)) ?>"><?= e($typeLabel((string)$slug)) ?></a>
         <?php endforeach; ?>
         <?php if (!empty($stats['media'])): ?><a class="btn" href="<?= e(admin_url('media')) ?>">Media</a><?php endif; ?>
-        <?php if (!empty($stats['menus'])): ?><a class="btn" href="<?= e(admin_url('settings/appearance/menus')) ?>">Menus</a><?php endif; ?>
-        <?php if (!empty($job['opts']['redirects'])): ?><a class="btn" href="<?= e(admin_url('settings/seo/redirects')) ?>">Redirects</a><?php endif; ?>
+        <?php if (!empty($stats['menus'])): ?><a class="btn" href="<?= e(admin_url('design/menus')) ?>">Menus</a><?php endif; ?>
+        <?php if (!empty($job['opts']['redirects'])): ?><a class="btn" href="<?= e(admin_url('seo/redirects')) ?>">Redirects</a><?php endif; ?>
         <?php if (!empty($report['templates'])): ?><a class="btn" href="<?= e(admin_url('templates')) ?>">Templates</a><?php endif; ?>
         <a class="btn" href="<?= e($base . '?tab=items') ?>">Old and new addresses</a>
       </div>
