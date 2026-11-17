@@ -1,0 +1,29 @@
+/* Site Migration (wordpress-importer): module styles on top of the admin UI kit. */
+.wpi-bar{height:8px;border-radius:99px;background:var(--surface-3);overflow:hidden}
+.wpi-bar i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .4s}
+.wpi-log{max-height:300px;font-size:12px;line-height:1.6;margin:0;white-space:pre-wrap;overflow:auto}
+.wpi-tags{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.wpi-note{display:flex;gap:12px;align-items:flex-start;padding:12px 14px;border:1px solid var(--border);border-radius:10px;background:var(--surface-2)}
+.wpi-note>svg{flex:none;margin-top:2px;color:var(--accent)}
+.wpi-note .btn{margin-top:8px}
+.wpi-cats{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:14px}
+.wpi-cat{margin:0}
+.wpi-cat-title{display:inline-flex;align-items:center;gap:8px;font-weight:600}
+.wpi-count{font-size:20px;font-variant-numeric:tabular-nums}
+.wpi-detail{margin:0;padding-left:18px;font-size:13px;color:var(--text-2)}
+.wpi-detail li{margin:2px 0;overflow-wrap:anywhere}
+.wpi-skip{display:flex;gap:6px;align-items:flex-start;margin:0}
+.wpi-skip svg{flex:none;margin-top:2px}
+.wpi-extra{gap:8px;flex-wrap:wrap;align-items:center}
+.wpi-extra .input{max-width:420px;flex:1 1 220px}
+.wpi-authors{max-width:520px}
+.wpi-report .card-head{flex-wrap:wrap;gap:8px}
+.wpi-report h2{display:inline-flex;align-items:center;gap:8px}
+.wpi-actions{white-space:nowrap;text-align:right}
+.wpi-log-box{position:relative}
+.wpi-log-box[open] .wpi-log{position:absolute;right:0;bottom:calc(100% + 6px);width:min(720px,90vw);background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px;z-index:5;box-shadow:var(--shadow-lg,0 10px 30px rgba(0,0,0,.15))}
+@media (max-width:720px){
+  .wpi-actions{white-space:normal;text-align:left}
+  .wpi-report .table td{display:block}
+  .wpi-cats{grid-template-columns:1fr}
+}

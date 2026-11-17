@@ -14,21 +14,71 @@ use Slate\Modules;
 use Slate\Options;
 use Slate\Posts;
 use Slate\Router;
+use SlateModules\WpImport\Archive;
+use SlateModules\WpImport\Companion;
+use SlateModules\WpImport\Data;
+use SlateModules\WpImport\Fetch;
 use SlateModules\WpImport\Importer;
+use SlateModules\WpImport\SqlDump;
+use SlateModules\WpImport\WxrExtras;
 
 require_once SLATE_MODULES . '/auto-cpt-generator/src/WpClient.php';
 require_once SLATE_MODULES . '/auto-cpt-generator/src/Generator.php';
 require_once SLATE_MODULES . '/auto-cpt-generator/src/Wxr.php';
-require_once __DIR__ . '/src/Importer.php';
-require_once __DIR__ . '/src/Mirror.php';
+foreach (['Fetch', 'Data', 'SqlDump', 'WxrExtras', 'Companion', 'Archive', 'Acf', 'Blocks', 'Shortcodes', 'Builders', 'Loops', 'Designed', 'FormsMap', 'SeoMap',
+    'TemplatesMap', 'Analyse', 'Importer', 'Mirror'] as $wpiClass) {
+    require_once __DIR__ . '/src/' . $wpiClass . '.php';
+}
+unset($wpiClass);
 
 Options::lazy('wpi_job', 'wpi_conn', 'wpi_scan');
 Hooks::add('module_activated_wordpress-importer', [Importer::class, 'install']);
+Hooks::add('module_updated_wordpress-importer', [Importer::class, 'install']);
 
 Modules::adminPage('Migration', 'wp-import', static function (): void {
     Importer::install();
     require __DIR__ . '/view.php';
 }, 'manage_settings', 'download');
+
+/** Options of the "Choose" step / command line → job options (unknown keys ignored). */
+function wpi_options(array $o): array
+{
+    $opts = ['types' => array_values(array_map('strval', (array)($o['types'] ?? [])))];
+    foreach (['model', 'media', 'seo', 'menus', 'settings', 'redirects', 'design', 'activate_theme', 'drafts', 'designed', 'clean', 'forms', 'templates', 'comments',
+                 'design_system', 'seo_global', 'plugin_redirects'] as $k) {
+        if (array_key_exists($k, $o)) {
+            $opts[$k] = !empty($o[$k]);
+        }
+    }
+    if (isset($o['authors']) && in_array($o['authors'], ['keep', 'create', 'me'], true)) {
+        $opts['authors'] = (string)$o['authors'];
+    }
+    foreach (['model', 'media', 'seo', 'menus', 'settings', 'redirects', 'design', 'activate_theme', 'drafts'] as $k) {
+        $opts[$k] ??= false; // 1.x: the form always sends these
+    }
+    return $opts;
+}
+
+/** Store an uploaded extra source (database dump or uploads archive) and stage what it contains. */
+function wpi_extra(string $tmp, string $name): array
+{
+    $ext = strtolower(pathinfo($name, PATHINFO_EXTENSION));
+    $isGz = str_ends_with(strtolower($name), '.sql.gz');
+    if ($ext === 'sql' || $isGz) {
+        $dest = Importer::WORK . '/database.sql' . ($isGz ? '.gz' : '');
+        @unlink(Importer::WORK . '/database.sql');
+        @unlink(Importer::WORK . '/database.sql.gz');
+        is_uploaded_file($tmp) ? move_uploaded_file($tmp, $dest) : copy($tmp, $dest);
+        $rows = SqlDump::load($dest);
+        @unlink($dest); // staged; the dump itself is not kept
+        return ['kind' => 'sql', 'rows' => $rows];
+    }
+    if ($ext === 'zip') {
+        $stats = Archive::extract($tmp);
+        return ['kind' => 'uploads', 'stats' => $stats];
+    }
+    throw new RuntimeException('Upload a database dump (.sql or .sql.gz) or a .zip of wp-content/uploads.');
+}
 
 // Form entries of the previous site now live in the Forms module's Submissions inbox.
 
@@ -50,12 +100,40 @@ Hooks::add('admin_routes', static function (Router $r): void {
         if (!filter_var($conn['url'], FILTER_VALIDATE_URL) && !filter_var('https://' . $conn['url'], FILTER_VALIDATE_URL)) {
             throw new RuntimeException('Enter the WordPress site address, e.g. https://example.com');
         }
-        $scan = Importer::scan($conn);
+        $scan = Importer::scan($conn + ['_fresh' => true]);
         $conn['url'] = $scan['summary']['url'];
         Options::set('wpi_conn', $conn, false);
         Options::set('wpi_scan', $scan, false);
         return ['scan' => $scan];
     }));
+    // Optional extra sources, added on the Analyse step: a database dump or a .zip of wp-content/uploads.
+    $r->post('/m/wp-import/extra', static fn() => $respond(static function (): array {
+        $conn = Options::get('wpi_conn');
+        $scan = Options::get('wpi_scan');
+        if (!$conn || !$scan) {
+            throw new RuntimeException('Connect to a site or upload its export file first.');
+        }
+        $f = $_FILES['file'] ?? null;
+        if (!$f || $f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) {
+            throw new RuntimeException('The file did not arrive. If it is large, raise upload_max_filesize and post_max_size, or use the command line (--sql=, --uploads=).');
+        }
+        Importer::install();
+        @set_time_limit(900);
+        $res = wpi_extra($f['tmp_name'], (string)$f['name']);
+        $scan = Importer::reanalyse($conn, $scan);
+        Options::set('wpi_scan', $scan, false);
+        return ['added' => $res, 'scan' => $scan];
+    }));
+    $r->get('/m/wp-import/companion.zip', static function (): void {
+        Auth::require('manage_settings');
+        $file = Companion::zip();
+        header('Content-Type: application/zip');
+        header('Content-Disposition: attachment; filename="slate-export.zip"');
+        header('Content-Length: ' . filesize($file));
+        header('X-Content-Type-Options: nosniff');
+        readfile($file);
+        exit;
+    });
     $r->post('/m/wp-import/upload', static fn() => $respond(static function (): array {
         $f = $_FILES['file'] ?? null;
         if (!$f || $f['error'] !== UPLOAD_ERR_OK || !is_uploaded_file($f['tmp_name'])) {
@@ -65,7 +143,7 @@ Hooks::add('admin_routes', static function (Router $r): void {
         move_uploaded_file($f['tmp_name'], Importer::WORK . '/export.xml');
         @unlink(Importer::WORK . '/wxr.json');
         $conn = ['source' => 'wxr', 'url' => ''];
-        $scan = Importer::scan($conn);
+        $scan = Importer::scan($conn + ['_fresh' => true]);
         $conn['url'] = $scan['summary']['url'];
         Options::set('wpi_conn', $conn, false);
         Options::set('wpi_scan', $scan, false);
@@ -77,11 +155,8 @@ Hooks::add('admin_routes', static function (Router $r): void {
         if (!$conn || !$scan) {
             throw new RuntimeException('Connect to a site first.');
         }
-        $o = json_input()['options'] ?? [];
-        $opts = ['types' => array_values(array_map('strval', (array)($o['types'] ?? [])))];
-        foreach (['model', 'media', 'seo', 'menus', 'settings', 'redirects', 'design', 'activate_theme', 'drafts'] as $k) {
-            $opts[$k] = !empty($o[$k]);
-        }
+        $o = (array)(json_input()['options'] ?? []);
+        $opts = wpi_options($o);
         if (!empty($o['only'])) {
             $opts['only'] = array_values(array_map('strval', (array)$o['only']));
         }
@@ -201,7 +276,7 @@ function wpi_serve_asset(string $path): void
     $self = strtolower((string)($_SERVER['HTTP_HOST'] ?? ''));
     if ($origin && in_array($ext, $allowed, true) && strcasecmp((string)parse_url($origin, PHP_URL_HOST), $self) !== 0) {
         @mkdir(dirname($file), 0755, true);
-        if ((new \SlateModules\AutoCpt\WpClient($origin))->download($origin . $path, $file . '.part')) {
+        if ((new Fetch($origin))->download($origin . $path, $file . '.part', 20 * 1024 * 1024)) {
             rename($file . '.part', $file);
             $types = ['css' => 'text/css', 'js' => 'application/javascript', 'svg' => 'image/svg+xml', 'woff2' => 'font/woff2', 'woff' => 'font/woff', 'json' => 'application/json'];
             header('Content-Type: ' . ($types[$ext] ?? (mime_content_type($file) ?: 'application/octet-stream')));
@@ -217,14 +292,19 @@ function wpi_serve_asset(string $path): void
 // ---------------------------------------------------------------- command line
 // php bin/slate import:wordpress --url=https://example.com --user=admin [--password=APP_PASSWORD]
 //      [--no-design] [--no-theme] [--no-media] [--no-drafts] [--types=post,page,...] [--fresh]
+//      [--wxr=export.xml] [--sql=database.sql(.gz)] [--uploads=uploads.zip]
+//      [--everything] or any of: [--designed] [--clean] [--forms] [--templates] [--comments] [--authors=create|me|keep]
+//      [--design-system] [--seo-global] [--plugin-redirects]
+// Without the 2.0 flags the command behaves exactly like 1.x (what an existing migration expects when it syncs).
 Hooks::add('cli_commands', static function (array $commands): array {
     $commands['import:wordpress'] = ['Import a WordPress site (--url=https://example.com --user=admin)',
         static function (array $opts, string $arg, callable $out, callable $fail): void {
             $url = (string)($opts['url'] ?? '');
             $user = (string)($opts['user'] ?? '');
             $pass = (string)($opts['password'] ?? (getenv('WP_APP_PASSWORD') ?: ''));
-            if ($url === '') {
-                $fail('Missing --url=https://your-wordpress-site.com');
+            $wxrFile = (string)($opts['wxr'] ?? '');
+            if ($url === '' && $wxrFile === '') {
+                $fail('Missing --url=https://your-wordpress-site.com (or --wxr=export.xml)');
             }
             if ($user !== '' && $pass === '') {
                 fwrite(STDOUT, 'WordPress application password for ' . $user . ': ');
@@ -243,10 +323,31 @@ Hooks::add('cli_commands', static function (array $commands): array {
                 $out('✓ Removed previously imported content (--fresh)');
             }
             @set_time_limit(0);
-            $conn = ['source' => 'rest', 'url' => $url, 'user' => $user, 'pass' => Crypto::encrypt(preg_replace('/\s+/', '', $pass))];
-            $out("→ Analysing $url …");
+            if ($wxrFile !== '') {
+                if (!is_file($wxrFile)) {
+                    $fail("Export file not found: $wxrFile");
+                }
+                copy($wxrFile, Importer::WORK . '/export.xml');
+                @unlink(Importer::WORK . '/wxr.json');
+                $conn = ['source' => 'wxr', 'url' => ''];
+            } else {
+                $conn = ['source' => 'rest', 'url' => $url, 'user' => $user, 'pass' => Crypto::encrypt(preg_replace('/\s+/', '', $pass))];
+            }
+            $out('Analysing ' . ($wxrFile ?: $url) . ' ...');
             try {
-                $scan = Importer::scan($conn);
+                $scan = Importer::scan($conn + ['_fresh' => true]);
+                foreach (['sql' => 'database dump', 'uploads' => 'uploads archive'] as $flag => $label) {
+                    if (!empty($opts[$flag])) {
+                        if (!is_file((string)$opts[$flag])) {
+                            $fail("File not found: {$opts[$flag]}");
+                        }
+                        $res = wpi_extra((string)$opts[$flag], basename((string)$opts[$flag]));
+                        $out("  Added the $label: " . json_encode($res['rows'] ?? $res['stats'] ?? []));
+                    }
+                }
+                if (!empty($opts['sql']) || !empty($opts['uploads'])) {
+                    $scan = Importer::reanalyse($conn, $scan);
+                }
             } catch (Throwable $e) {
                 $fail($e->getMessage());
             }
@@ -261,11 +362,21 @@ Hooks::add('cli_commands', static function (array $commands): array {
             Options::set('wpi_conn', $conn, false);
             Options::set('wpi_scan', $scan, false);
             $types = !empty($opts['types']) ? array_map('trim', explode(',', (string)$opts['types'])) : array_keys($scan['counts']['types'] ?? []);
+            $all = !empty($opts['everything']);
+            $new = [];
+            foreach (['designed', 'clean', 'forms', 'templates', 'comments', 'design-system', 'seo-global', 'plugin-redirects'] as $f) {
+                if ($all || !empty($opts[$f])) {
+                    $new[str_replace('-', '_', $f)] = true;
+                }
+            }
+            if ($all || !empty($opts['authors'])) {
+                $new['authors'] = in_array($opts['authors'] ?? '', ['create', 'me', 'keep'], true) ? (string)$opts['authors'] : 'create';
+            }
             $job = Importer::start($conn, $scan, [
                 'types' => $types, 'model' => true, 'media' => empty($opts['no-media']), 'seo' => true, 'menus' => true, 'settings' => true,
                 'redirects' => true, 'design' => empty($opts['no-design']), 'activate_theme' => empty($opts['no-theme']) && empty($opts['no-design']),
                 'drafts' => empty($opts['no-drafts']),
-            ]);
+            ] + $new);
             $out('→ Importing (' . count($job['steps']) . ' steps) …');
             $shown = 0;
             do {

@@ -4,7 +4,6 @@ declare(strict_types=1);
 namespace SlateModules\WpImport;
 
 use Slate\Options;
-use SlateModules\AutoCpt\WpClient;
 
 /**
  * Mirrors a WordPress/Elementor site's design into Slate:
@@ -20,18 +19,46 @@ final class Mirror
     private const SKIP_JS = '#(googletagmanager|gtag\(|fbq\(|clarity\.ms|hotjar|wp-emoji|_wpemojiSettings|admin-bar|wp-embed|connect\.facebook|analytics\.js|cdn-cgi/challenge|comment-reply)#i';
     private string $origin;
     private string $host;
-    private WpClient $http;
+    private Fetch $http;
+    /** Where mirrored files go (SLATE_ROOT keeps the original /wp-content/… paths; designed pages use the uploads folder). */
+    private string $root;
+    /** URL path prefix in front of the original path (e.g. "content/uploads/wp-site"). */
+    private string $prefix;
     private int $downloaded = 0;
     private array $seen = [];
     /** captureSite() re-downloads top-level CSS/JS so design changes on the old site are picked up. */
     private bool $refresh = false;
 
-    public function __construct(string $origin)
+    public function __construct(string $origin, ?string $root = null, string $prefix = '')
     {
         $this->origin = rtrim($origin, '/');
         $port = parse_url($this->origin, PHP_URL_PORT);
         $this->host = preg_replace('/^www\./', '', (string)parse_url($this->origin, PHP_URL_HOST)) . ($port ? ':' . $port : '');
-        $this->http = new WpClient($this->origin);
+        $this->http = new Fetch($this->origin);
+        $this->root = rtrim($root ?? SLATE_ROOT, '/');
+        $this->prefix = trim($prefix, '/');
+    }
+
+    /** Local URL of an original root-relative path (e.g. /wp-content/themes/x/style.css). */
+    public function localUrl(string $path): string
+    {
+        return url(ltrim(($this->prefix !== '' ? $this->prefix . '/' : '') . ltrim($path, '/'), '/'));
+    }
+
+    public function isOwnUrl(string $url): bool
+    {
+        return $this->isOwn($url);
+    }
+
+    public function absUrl(string $url, string $base = ''): string
+    {
+        return $this->abs($url, $base);
+    }
+
+    /** Root-relative original path of an own asset that can be mirrored, else null. */
+    public function assetPath(string $abs): ?string
+    {
+        return $this->localPath($abs);
     }
 
     // ------------------------------------------------------------------ DOM helpers
@@ -123,8 +150,8 @@ final class Mirror
         if ($path === null) {
             return $abs;
         }
-        $rel = url(ltrim($path, '/'));
-        $dest = SLATE_ROOT . $path;
+        $rel = $this->localUrl($path);
+        $dest = $this->root . $path;
         // Reuse files mirrored in the last 12 hours (the homepage capture refreshes theme assets once per run).
         if (isset($this->seen[$path]) || (is_file($dest) && filesize($dest) > 0 && ($depth > 0 || !$this->refresh || filemtime($dest) > time() - 43200 && !$this->refresh))) {
             return $rel;
@@ -161,9 +188,9 @@ final class Mirror
                 }
                 $abs = $this->abs($h[1]);
                 $path = $this->localPath($abs);
-                if ($path && !is_file(SLATE_ROOT . $path) && !isset($this->seen[$path])) {
-                    @mkdir(dirname(SLATE_ROOT . $path), 0755, true);
-                    $map[$abs] = SLATE_ROOT . $path . '.part';
+                if ($path && !is_file($this->root . $path) && !isset($this->seen[$path])) {
+                    @mkdir(dirname($this->root . $path), 0755, true);
+                    $map[$abs] = $this->root . $path . '.part';
                 }
             }
         }

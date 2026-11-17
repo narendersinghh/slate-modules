@@ -9,7 +9,16 @@ use Slate\Media;
 use Slate\Options;
 use Slate\Posts;
 use Slate\Terms;
+use SlateModules\WpImport\Builders;
+use SlateModules\WpImport\Data;
 use SlateModules\WpImport\Importer;
+
+if (!function_exists('wpi_stat_label')) {
+    function wpi_stat_label(string $k, callable $typeLabel): string
+    {
+        return ['terms' => 'Categories & tags', 'media' => 'Media files', 'media_failed' => 'Media failed', 'menus' => 'Menus', 'archives' => 'Archive pages'][$k] ?? $typeLabel($k);
+    }
+}
 
 $base = admin_url('m/wp-import');
 $job = Importer::job();
@@ -210,23 +219,35 @@ endif;
 
 // ------------------------------------------------------------------ wizard
 
+$asset = static function (string $f): string {
+    $path = __DIR__ . '/assets/' . $f;
+    return url('modules/wordpress-importer/assets/' . $f) . '?v=' . substr(md5((string)@filemtime($path)), 0, 8);
+};
 $step = (string)($_GET['step'] ?? '');
-if (!in_array($step, ['source', 'review', 'run'], true)) {
-    $step = $job ? 'run' : ($scan ? 'review' : 'source');
+$step = $step === 'review' ? 'analyse' : $step; // 1.x links
+if (!in_array($step, ['source', 'analyse', 'choose', 'run', 'report'], true)) {
+    $step = $job ? (!empty($job['finished_at']) ? 'report' : 'run') : ($scan ? 'analyse' : 'source');
 }
-if ($step === 'review' && !$scan) {
+if (in_array($step, ['analyse', 'choose'], true) && !$scan) {
     $step = 'source';
 }
-if ($step === 'run' && !$job) {
-    $step = $scan ? 'review' : 'source';
+if (in_array($step, ['run', 'report'], true) && !$job) {
+    $step = $scan ? 'analyse' : 'source';
+}
+if ($step === 'report' && empty($job['finished_at'])) {
+    $step = 'run';
 }
 $running = $job && !$job['finished_at'];
-$steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', (bool)$scan], 'run' => ['3', 'Import', (bool)$job]];
+$ai = \Slate\Ai::enabled() && \Slate\Auth::can('use_ai');
+$analysis = $scan['analysis'] ?? null;
+$wizard = ['source' => 'Connect', 'analyse' => 'Analyse', 'choose' => 'Choose', 'run' => 'Import', 'report' => 'Report'];
+$reach = ['source' => true, 'analyse' => (bool)$scan, 'choose' => (bool)$scan, 'run' => (bool)$job, 'report' => !empty($job['finished_at'])];
 ?>
-<div class="stack" data-wpi data-base="<?= e($base) ?>">
+<link rel="stylesheet" href="<?= e($asset('importer.css')) ?>">
+<div class="stack wpi" data-wpi data-base="<?= e($base) ?>">
   <nav class="wizard-steps" aria-label="Steps">
-    <?php foreach ($steps as $k => [$n, $label, $reachable]): ?>
-      <?php if ($reachable): ?>
+    <?php $n = 0; foreach ($wizard as $k => $label): $n++; ?>
+      <?php if ($reach[$k]): ?>
         <a href="<?= e($base . '?step=' . $k) ?>"<?= $k === $step ? ' class="active" aria-current="step"' : '' ?>><span><?= $n ?></span> <?= e($label) ?></a>
       <?php else: ?>
         <button type="button" disabled><span><?= $n ?></span> <?= e($label) ?></button>
@@ -236,14 +257,14 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
 
 <?php if ($step === 'source'): $src = ($conn['source'] ?? 'rest') === 'wxr' ? 'wxr' : 'rest'; ?>
   <?php if ($running): ?>
-    <div class="alert">An import is paused. <a href="<?= e($base . '?step=run') ?>">Resume it</a> or analyse a new source below.</div>
+    <div class="alert">An import is paused. <a href="<?= e($base . '?step=run') ?>">Resume it</a> or connect a new source below.</div>
   <?php endif; ?>
   <section class="card">
     <div class="card-head"><h2>Where is the site now?</h2></div>
     <div class="card-pad stack">
       <div class="choice-grid">
-        <label class="choice-card"><input type="radio" name="wpi_src" value="rest"<?= $src === 'rest' ? ' checked' : '' ?>><span>Live WordPress site <small class="muted">(recommended)</small><br><small class="muted">Reads everything, including drafts, menus and settings.</small></span></label>
-        <label class="choice-card"><input type="radio" name="wpi_src" value="wxr"<?= $src === 'wxr' ? ' checked' : '' ?>><span>WordPress export file (.xml)<br><small class="muted">When you can't give admin access. Media still downloads from the live site.</small></span></label>
+        <label class="choice-card"><input type="radio" name="wpi_src" value="rest"<?= $src === 'rest' ? ' checked' : '' ?>><span>Live WordPress site <small class="muted">(recommended)</small><br><small class="muted">Reads everything, including drafts, menus, settings and the exact design of builder pages.</small></span></label>
+        <label class="choice-card"><input type="radio" name="wpi_src" value="wxr"<?= $src === 'wxr' ? ' checked' : '' ?>><span>WordPress export file (.xml)<br><small class="muted">When you can't give admin access. Add a database dump on the next step to get settings, SEO and forms too.</small></span></label>
       </div>
       <div data-src-panel="rest" class="stack-sm"<?= $src === 'rest' ? '' : ' hidden' ?>>
         <div class="grid-form">
@@ -251,29 +272,29 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
           <label class="field"><span>Administrator username</span><input class="input" data-in="user" value="<?= e($conn['user'] ?? '') ?>" autocomplete="off"></label>
           <label class="field"><span>Application password</span><input class="input" type="password" data-in="password" autocomplete="new-password" placeholder="xxxx xxxx xxxx xxxx xxxx xxxx"></label>
         </div>
-        <small class="help">In WordPress go to <strong>Users › Profile › Application Passwords</strong>, add one named “Slate” and paste it here. Never use your login password. Without it only public content is read.</small>
+        <small class="help">In WordPress go to <strong>Users › Profile › Application Passwords</strong>, add one named “Slate” and paste it here. Never use your login password. Without it only public content is read. The password is stored encrypted.</small>
+        <div class="wpi-note">
+          <?= icon('plug', 16) ?>
+          <div><strong>Get everything with the Slate Export plugin</strong> <span class="muted small">(optional)</span><br>
+            <span class="muted small">WordPress does not share custom field definitions, form settings, Elementor templates, SEO settings and plugin redirects through its normal API. Install this small read-only plugin on the old site (Plugins › Add New › Upload) and Slate reads them too. Remove it when you are done.</span><br>
+            <a class="btn btn-sm" href="<?= e($base . '/companion.zip') ?>"><?= icon('download', 14) ?> Download slate-export.zip</a></div>
+        </div>
       </div>
       <div data-src-panel="wxr" class="stack-sm"<?= $src === 'wxr' ? '' : ' hidden' ?>>
         <label class="field"><span>Export file</span><input class="input" type="file" accept=".xml" data-file></label>
-        <small class="help">In WordPress: <strong>Tools › Export › All content</strong>. Keep the old site online during the import so media can be downloaded.</small>
+        <small class="help">In WordPress: <strong>Tools › Export › All content</strong>. Keep the old site online during the import so media and page designs can be copied (or add a .zip of wp-content/uploads on the next step).</small>
       </div>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small">Nothing is imported yet, next you'll see what was found.</span>
+      <span class="muted small">Nothing is imported yet: next you'll see what was found.</span>
       <button type="button" class="btn btn-primary" data-connect><?= icon('search', 15) ?> Analyse site</button>
     </div>
   </section>
 
-<?php elseif ($step === 'review'):
+<?php elseif ($step === 'analyse'):
     $sum = $scan['summary'];
-    $spec = $scan['spec'] ?? [];
-    // Pre-fill with the choices of the last full import (not a partial "only these steps" refresh).
-    $opts = (empty($job['opts']['only']) ? ($job['opts'] ?? []) : []) + ['types' => []];
-    $specTypes = array_column($spec['post_types'] ?? [], 'plural', 'slug');
-    // Pre-tick the types chosen last time (when they belong to this source), otherwise everything.
-    $picked = array_intersect((array)$opts['types'], array_map('strval', array_keys($scan['counts']['types'] ?? [])));
-    $detected = implode(' · ', array_filter([!empty($sum['elementor']) ? 'Page builder (Elementor)' : null, is_string($sum['seo'] ?? null) ? $sum['seo'] : (!empty($sum['seo']) ? 'SEO meta' : null), !empty($sum['acf']) ? 'ACF custom fields' : null]));
-    $total = 0;
+    $srcs = (array)($analysis['sources'] ?? []);
+    $dataSources = Data::sources();
     ?>
   <section class="card">
     <div class="card-head row-between"><h2>What we found</h2><a class="btn btn-ghost btn-sm" href="<?= e($base . '?step=source') ?>">Change source</a></div>
@@ -282,13 +303,81 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
         <span>Site</span><strong><?= e((string)($sum['site'] ?: '-')) ?></strong>
         <span>Address</span><span><?= $sum['url'] ? '<a href="' . e((string)$sum['url']) . '" target="_blank" rel="noopener">' . e((string)$sum['url']) . '</a>' : '-' ?></span>
         <span>Access</span><span><?= ($conn['source'] ?? '') === 'wxr' ? 'Export file' : (!empty($sum['auth']) ? 'Signed in as ' . e((string)($sum['user'] ?? 'admin')) : AdminUi::pill('Public content only', 'warn') . ' <small class="muted">drafts, menus and settings need an application password</small>') ?></span>
-        <span>Detected</span><span><?= e($detected ?: 'Nothing special') ?></span>
-        <span>Media files</span><span><?= e(isset($sum['media']) ? number_format((int)$sum['media']) : '-') ?></span>
-        <span>Menus</span><span><?= e(isset($sum['menus']) ? number_format((int)$sum['menus']) : 'Not readable') ?></span>
+        <span>Data sources</span><span class="wpi-tags">
+          <?php foreach (['rest' => 'REST API', 'companion' => 'Slate Export plugin', 'wxr' => 'Export file', 'sql' => 'Database dump', 'uploads' => 'Uploads archive'] as $k => $label): if (!empty($srcs[$k])): ?>
+            <?= AdminUi::pill($label, 'success') ?>
+          <?php endif; endforeach; ?></span>
       </div>
     </div>
   </section>
 
+  <?php if ($analysis): ?>
+  <div class="wpi-cats">
+    <?php foreach ($analysis['categories'] as $key => $c): ?>
+      <section class="card wpi-cat">
+        <div class="card-pad stack-sm">
+          <div class="row-between"><span class="wpi-cat-title"><?= icon((string)$c['icon'], 16) ?> <?= e((string)$c['label']) ?></span>
+            <strong class="wpi-count"><?= $c['found'] === null ? '' : number_format((int)$c['found']) ?></strong></div>
+          <?php if (!empty($c['detail'])): ?><ul class="wpi-detail"><?php foreach (array_slice((array)$c['detail'], 0, 8) as $d): ?><li><?= e((string)$d) ?></li><?php endforeach; ?></ul><?php endif; ?>
+          <p class="small" style="margin:0"><?= e((string)$c['will']) ?></p>
+          <?php foreach ((array)($c['skip'] ?? []) as $sk): ?><p class="small muted wpi-skip"><?= icon('info', 13) ?> <?= e((string)$sk) ?></p><?php endforeach; ?>
+        </div>
+      </section>
+    <?php endforeach; ?>
+  </div>
+  <?php if (!empty($analysis['never'])): ?>
+    <p class="muted small"><?= icon('info', 13) ?> Not imported: <?= e(implode(' ', $analysis['never'])) ?></p>
+  <?php endif; ?>
+  <?php endif; ?>
+
+  <section class="card">
+    <div class="card-head"><h2>Add more data <span class="muted small">(optional)</span></h2></div>
+    <div class="card-pad stack-sm">
+      <p class="small muted" style="margin:0">A <strong>database dump</strong> (.sql or .sql.gz, e.g. from phpMyAdmin or your host's backups) adds custom field definitions, SEO settings, forms, templates, plugin redirects and menu locations. It is read, never run. A <strong>.zip of wp-content/uploads</strong> lets media come from the archive instead of the old site.</p>
+      <div class="row wpi-extra">
+        <input class="input" type="file" accept=".sql,.gz,.zip" data-extra-file>
+        <button type="button" class="btn" data-extra><?= icon('upload', 15) ?> Add file</button>
+      </div>
+      <?php if (!empty($dataSources['sql'])): ?><small class="muted">Database dump read: <?= e(number_format(array_sum((array)($dataSources['sql']['rows'] ?? [])))) ?> rows of interest.</small><?php endif; ?>
+      <?php if (!empty($dataSources['uploads'])): ?><small class="muted">Uploads archive: <?= e(number_format((int)($dataSources['uploads']['files'] ?? 0))) ?> files.</small><?php endif; ?>
+      <?php if (($conn['source'] ?? '') === 'rest' && empty($srcs['companion'])): ?>
+        <small class="muted">Or install the <a href="<?= e($base . '/companion.zip') ?>">Slate Export plugin</a> on the old site and analyse again.</small>
+      <?php endif; ?>
+    </div>
+    <div class="card-foot row-between">
+      <span class="muted small">Next, choose what to import.</span>
+      <a class="btn btn-primary" href="<?= e($base . '?step=choose') ?>">Choose what to import <?= icon('chevron-right', 15) ?></a>
+    </div>
+  </section>
+
+<?php elseif ($step === 'choose'):
+    $sum = $scan['summary'];
+    $spec = $scan['spec'] ?? [];
+    // Pre-fill with the choices of the last full import (not a partial refresh); a first migration gets the 2.0 defaults.
+    $last = empty($job['opts']['only']) ? ($job['opts'] ?? []) : [];
+    $fresh = !$last;
+    $defaults = ['model' => true, 'media' => true, 'seo' => true, 'menus' => true, 'settings' => true, 'redirects' => true, 'design' => true, 'activate_theme' => true,
+        'drafts' => true, 'designed' => $fresh, 'clean' => $fresh, 'forms' => $fresh, 'templates' => $fresh, 'comments' => $fresh, 'design_system' => false,
+        'seo_global' => $fresh, 'plugin_redirects' => $fresh, 'authors' => $fresh ? 'create' : 'keep'];
+    $opts = $last + $defaults + ['types' => []];
+    $specTypes = array_column($spec['post_types'] ?? [], 'plural', 'slug');
+    $picked = array_intersect((array)$opts['types'], array_map('strval', array_keys($scan['counts']['types'] ?? [])));
+    $total = 0;
+    $cats = (array)($analysis['categories'] ?? []);
+    $found = static fn(string $k) => isset($cats[$k]['found']) && $cats[$k]['found'] !== null ? ' (' . number_format((int)$cats[$k]['found']) . ')' : '';
+    $groups = [
+        'Content' => ['drafts' => 'Include drafts and private content', 'clean' => 'Turn block editor content into clean HTML (columns, galleries, buttons, embeds)',
+            'designed' => 'Keep builder pages exactly as designed' . $found('builders') . ', editable by clicking'],
+        'Structure' => ['model' => 'Create post types, taxonomies and custom fields' . $found('model'), 'menus' => 'Menus' . $found('menus'),
+            'templates' => 'Templates and post lists, saved switched off for review' . $found('templates'), 'settings' => 'Site title, tagline, timezone and homepage'],
+        'SEO and addresses' => ['seo' => 'SEO per page: titles, descriptions, focus keywords, robots, social', 'seo_global' => 'SEO settings: separator, title templates, noindex rules, social profiles',
+            'redirects' => '301 redirects for every address that changes', 'plugin_redirects' => 'Redirects kept by SEO and redirect plugins' . $found('redirects')],
+        'Media, forms and people' => ['media' => 'Media library (optimised to WebP)' . $found('media'), 'forms' => 'Forms, rebuilt in Slate Forms' . $found('forms'),
+            'comments' => 'Comments' . $found('comments')],
+        'Look of the rest of the site' => ['design' => 'Mirror the theme (header, footer, styles) for all other pages', 'activate_theme' => 'Switch to the mirrored theme when done',
+            'design_system' => 'Copy the Elementor global colours and fonts into the design system'],
+    ];
+    ?>
   <section class="card">
     <div class="card-head"><h2>Content to import</h2><span class="muted small">Untick anything you don't want.</span></div>
     <div class="table-wrap">
@@ -310,199 +399,148 @@ $steps = ['source' => ['1', 'Choose source', true], 'review' => ['2', 'Review', 
     </div>
   </section>
 
-  <?php if (!empty($scan['counts']['taxonomies']) || !empty($spec['field_groups'])): ?>
-  <div class="grid-2">
-    <?php if (!empty($scan['counts']['taxonomies'])): ?>
-    <section class="card">
-      <div class="card-head"><h2>Taxonomies</h2></div>
-      <div class="table-wrap"><table class="table table-compact">
-        <thead><tr><th>WordPress</th><th>Becomes</th><th class="num">Terms</th></tr></thead>
-        <tbody>
-        <?php foreach ($scan['counts']['taxonomies'] as $wp => $c): $exists = ContentModel::taxonomy((string)$c['slug']) !== null; ?>
-          <tr><td><code><?= e((string)$wp) ?></code></td><td><?= e($exists ? $taxLabel((string)$c['slug']) : (string)$c['slug']) ?> <?= $exists ? AdminUi::pill('exists') : AdminUi::pill('new', 'info') ?></td>
-            <td class="num"><?= $c['total'] === null ? '-' : number_format((int)$c['total']) ?></td></tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table></div>
-    </section>
-    <?php endif; ?>
-    <?php if (!empty($spec['field_groups'])): ?>
-    <section class="card">
-      <div class="card-head"><h2>Custom fields</h2></div>
-      <div class="table-wrap"><table class="table table-compact">
-        <thead><tr><th>Field group</th><th>Used on</th><th class="num">Fields</th></tr></thead>
-        <tbody>
-        <?php foreach ($spec['field_groups'] as $g): ?>
-          <tr><td><strong><?= e((string)($g['title'] ?? 'Fields')) ?></strong><br><small class="muted"><?= e(implode(', ', array_slice(array_column((array)($g['fields'] ?? []), 'name'), 0, 8)) . (count((array)($g['fields'] ?? [])) > 8 ? '…' : '')) ?></small></td>
-            <td><?= e(implode(', ', array_merge((array)($g['post_types'] ?? []), (array)($g['taxonomies'] ?? [])))) ?></td>
-            <td class="num"><?= count((array)($g['fields'] ?? [])) ?></td></tr>
-        <?php endforeach; ?>
-        </tbody>
-      </table></div>
-    </section>
-    <?php endif; ?>
-  </div>
-  <?php endif; ?>
-
   <section class="card">
     <div class="card-head"><h2>Options</h2></div>
-    <div class="card-pad">
-      <div class="choice-grid">
-        <?php foreach ([
-            'model' => 'Create post types, taxonomies and custom fields', 'media' => 'Import media (optimized to WebP)',
-            'seo' => 'SEO titles, descriptions, robots and social tags', 'menus' => 'Menus', 'settings' => 'Site title, tagline, timezone and homepage',
-            'redirects' => '301 redirects for any URL that changes', 'design' => 'Mirror the design (theme, page-builder styles, header, footer)',
-            'activate_theme' => 'Switch to the mirrored theme when done', 'drafts' => 'Include drafts and private content',
-        ] as $k => $label): ?>
-          <label class="choice-card"><input type="checkbox" data-opt="<?= e($k) ?>"<?= ($opts[$k] ?? true) ? ' checked' : '' ?>><span><?= e($label) ?></span></label>
-        <?php endforeach; ?>
-      </div>
+    <div class="card-pad stack">
+      <?php foreach ($groups as $title => $items): ?>
+        <div class="stack-sm">
+          <strong class="small-label"><?= e($title) ?></strong>
+          <div class="choice-grid">
+            <?php foreach ($items as $k => $label): ?>
+              <label class="choice-card"><input type="checkbox" data-opt="<?= e($k) ?>"<?= !empty($opts[$k]) ? ' checked' : '' ?>><span><?= e($label) ?></span></label>
+            <?php endforeach; ?>
+          </div>
+        </div>
+      <?php endforeach; ?>
+      <label class="field wpi-authors"><span>Authors</span>
+        <select class="input" data-opt-select="authors">
+          <?php foreach (['create' => 'Match or create their accounts (suspended until you activate them)', 'me' => 'Make me the author of everything', 'keep' => 'Leave authors as they are'] as $v => $l): ?>
+            <option value="<?= e($v) ?>"<?= ($opts['authors'] ?? 'keep') === $v ? ' selected' : '' ?>><?= e($l) ?></option>
+          <?php endforeach; ?>
+        </select>
+      </label>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small">About <?= number_format($total + (int)($sum['media'] ?? 0)) ?> items. Running it again later updates what was imported, it never duplicates.</span>
+      <span class="muted small">About <?= number_format($total + (int)($sum['media'] ?? 0)) ?> items. Running it again later updates what was imported, it never duplicates, and keeps pages you edited in Slate.</span>
       <button type="button" class="btn btn-primary" data-start><?= icon('download', 16) ?> Start import</button>
     </div>
   </section>
 
-<?php else: // run
+<?php elseif ($step === 'run'):
     $stats = (array)($job['stats'] ?? []);
-    $statLabel = static function (string $k) use ($typeLabel): string {
-        return ['terms' => 'Categories & tags', 'media' => 'Media files', 'media_failed' => 'Media failed', 'menus' => 'Menus', 'archives' => 'Archive pages'][$k] ?? $typeLabel($k);
-    };
     $origin = (string)($job['origin'] ?? '');
     ?>
   <section class="card">
     <div class="card-head row-between">
       <h2><?= $running ? 'Importing' : 'Import finished' ?></h2>
-      <span data-label><?= $running ? AdminUi::pill(isset($_GET['go']) ? 'Starting…' : 'Paused', isset($_GET['go']) ? 'info' : 'warn') : AdminUi::pill('Finished ' . time_ago($job['finished_at']), 'success') ?></span>
+      <span data-label><?= $running ? AdminUi::pill(isset($_GET['go']) ? 'Starting' : 'Paused', isset($_GET['go']) ? 'info' : 'warn') : AdminUi::pill('Finished ' . time_ago($job['finished_at']), 'success') ?></span>
     </div>
     <div class="card-pad stack">
-      <?php if ($running): ?>
-        <div class="stack-sm">
-          <div class="row-between small"><span data-step-label>Ready to continue<?= $origin !== '' ? ', ' . e($origin) : '' ?></span><span class="num" data-pct></span></div>
-          <div class="wpi-bar"><i data-bar style="width:0"></i></div>
-          <span class="muted small">Large sites take a while. Keep this tab open, if you close it, come back and press Resume.</span>
-        </div>
-        <div class="type-tags" data-stats><?php foreach ($stats as $k => $v): ?><span class="pill"><?= e($statLabel((string)$k)) ?>: <?= (int)$v ?></span><?php endforeach; ?></div>
-      <?php else: ?>
-        <p style="margin:0">Imported from <strong><?= e($origin !== '' ? $origin : 'the export file') ?></strong>.</p>
-        <?= $stats ? AdminUi::kpis(array_combine(array_map(static fn($k) => $statLabel((string)$k), array_keys($stats)), array_map(static fn($v) => number_format((int)$v), $stats))) : '<p class="muted">Nothing new was imported.</p>' ?>
-        <div>
-          <strong class="small-label">Check the result</strong>
-          <div class="page-actions" style="margin-top:8px;justify-content:flex-start;flex-wrap:wrap">
-            <a class="btn btn-primary" href="<?= e(url()) ?>" target="_blank" rel="noopener"><?= icon('external', 15) ?> View site</a>
-            <?php foreach (array_unique(array_column($job['spec']['wp_map']['types'] ?? [], 'slug')) as $slug): if (!ContentModel::type((string)$slug) || empty($stats[$slug])) continue; ?>
-              <a class="btn" href="<?= e(admin_url('content/' . $slug)) ?>"><?= e($typeLabel((string)$slug)) ?></a>
-            <?php endforeach; ?>
-            <?php if (!empty($stats['media'])): ?><a class="btn" href="<?= e(admin_url('media')) ?>">Media</a><?php endif; ?>
-            <?php if (!empty($stats['menus'])): ?><a class="btn" href="<?= e(admin_url('settings/appearance/menus')) ?>">Menus</a><?php endif; ?>
-            <?php if (!empty($job['opts']['redirects'])): ?><a class="btn" href="<?= e(admin_url('settings/seo/redirects')) ?>">Redirects</a><?php endif; ?>
-            <a class="btn" href="<?= e($base . '?tab=items') ?>">Old and new addresses</a>
-          </div>
-        </div>
-      <?php endif; ?>
-      <details<?= $running ? ' open' : '' ?>>
+      <div class="stack-sm">
+        <div class="row-between small"><span data-step-label>Ready to continue<?= $origin !== '' ? ', ' . e($origin) : '' ?></span><span class="num" data-pct></span></div>
+        <div class="wpi-bar"><i data-bar style="width:<?= $running ? 0 : 100 ?>%"></i></div>
+        <span class="muted small">Large sites take a while. Keep this tab open; if you close it, come back and press Resume. Each step can be resumed.</span>
+      </div>
+      <div class="wpi-tags" data-stats><?php foreach ($stats as $k => $v): ?><span class="pill"><?= e(wpi_stat_label((string)$k, $typeLabel)) ?>: <?= (int)$v ?></span><?php endforeach; ?></div>
+      <details open>
         <summary class="muted" style="cursor:pointer">Activity log</summary>
         <pre class="wpi-log" data-log style="margin-top:10px"><?= e(implode("\n", array_slice($job['log'] ?? [], -40))) ?: 'Nothing logged yet.' ?></pre>
       </details>
     </div>
     <div class="card-foot row-between">
-      <span class="muted small"><?= $running ? 'Started ' . e(time_ago($job['started_at'])) : 'Run it again any time to pick up changes on the old site.' ?></span>
+      <span class="muted small"><?= $running ? 'Started ' . e(time_ago($job['started_at'])) : '' ?></span>
       <div class="page-actions">
-        <?php if ($running): ?>
-          <button type="button" class="btn btn-primary" data-resume><?= icon('refresh', 15) ?> Resume</button>
-        <?php else: ?>
-          <?php if ($scan): ?><a class="btn" href="<?= e($base . '?step=review') ?>"><?= icon('refresh', 15) ?> Sync again</a><?php endif; ?>
-          <a class="btn" href="<?= e($base . '?step=source') ?>">New migration</a>
-        <?php endif; ?>
+        <?php if ($running): ?><button type="button" class="btn btn-primary" data-resume><?= icon('refresh', 15) ?> Resume</button>
+        <?php else: ?><a class="btn btn-primary" href="<?= e($base . '?step=report') ?>">See the report</a><?php endif; ?>
+      </div>
+    </div>
+  </section>
+
+<?php else: // report
+    $stats = (array)($job['stats'] ?? []);
+    $origin = (string)($job['origin'] ?? '');
+    $report = (array)($job['report'] ?? []);
+    $catLabels = ['content' => ['Pages, posts and items', 'file-text'], 'designed' => ['Designed pages (builder pages)', 'columns'], 'builders' => ['Made with', 'columns'],
+        'model' => ['Post types and custom fields', 'database'], 'fields' => ['Custom field values', 'database'], 'terms' => ['Categories, tags and terms', 'tag'],
+        'media' => ['Media', 'image'], 'menus' => ['Menus', 'menu'], 'seo' => ['SEO', 'search'], 'redirects' => ['Redirects', 'link'], 'forms' => ['Forms', 'message'],
+        'templates' => ['Templates', 'layers'], 'comments' => ['Comments', 'message'], 'users' => ['Authors', 'users'], 'design' => ['Design', 'palette']];
+    $countLabel = static function (string $k): string {
+        return ['imported' => 'imported', 'created' => 'created', 'updated' => 'updated', 'kept' => 'kept your edits', 'kept_edits' => 'kept your edits', 'skipped' => 'skipped',
+            'failed' => 'failed', 'designed' => 'kept with their design', 'cleaned' => 'converted to clean HTML', 'rebuilt_offline' => 'rebuilt without design (site offline)',
+            'skipped_drafts' => 'drafts skipped', 'sticky' => 'sticky', 'relinked' => 'links updated', 'from_archive' => 'from the uploads archive', 'no_alt' => 'images without alt text',
+            'items' => 'items', 'focus_keywords' => 'focus keywords', 'settings' => 'settings', 'changed_urls' => 'for changed addresses', 'from_rank_math' => 'from Rank Math',
+            'from_redirection' => 'from Redirection', 'from_yoast_premium' => 'from Yoast Premium', 'plugin_skipped' => 'duplicates skipped', 'embeds_replaced' => 'embeds replaced',
+            'definitions' => 'definitions', 'acf_groups' => 'ACF field groups', 'items_with_acf' => 'items with ACF values', 'mapped' => 'already linked', 'matched' => 'matched to existing accounts',
+            'already' => 'already imported', 'design_system' => 'design system updated', 'skipped_header' => 'headers (kept in designed pages)', 'skipped_footer' => 'footers (kept in designed pages)',
+            'skipped_popup' => 'popups (kept in designed pages)'][$k] ?? (Builders::LABELS[$k] ?? str_replace('_', ' ', $k));
+    };
+    $structure = (array)($report['structure'] ?? []);
+    unset($report['structure']);
+    ?>
+  <section class="card">
+    <div class="card-head row-between">
+      <h2>Migration report</h2>
+      <span><?= AdminUi::pill('Finished ' . time_ago($job['finished_at']), 'success') ?></span>
+    </div>
+    <div class="card-pad stack">
+      <p style="margin:0">Imported from <strong><?= e($origin !== '' ? $origin : 'the export file') ?></strong>.</p>
+      <?= $stats ? AdminUi::kpis(array_combine(array_map(static fn($k) => wpi_stat_label((string)$k, $typeLabel), array_keys($stats)), array_map(static fn($v) => number_format((int)$v), $stats))) : '<p class="muted">Nothing new was imported.</p>' ?>
+      <div class="page-actions" style="justify-content:flex-start;flex-wrap:wrap">
+        <a class="btn btn-primary" href="<?= e(url()) ?>" target="_blank" rel="noopener"><?= icon('external', 15) ?> View site</a>
+        <?php foreach (array_unique(array_column($job['spec']['wp_map']['types'] ?? [], 'slug')) as $slug): if (!ContentModel::type((string)$slug) || empty($stats[$slug])) continue; ?>
+          <a class="btn" href="<?= e(admin_url('content/' . $slug)) ?>"><?= e($typeLabel((string)$slug)) ?></a>
+        <?php endforeach; ?>
+        <?php if (!empty($stats['media'])): ?><a class="btn" href="<?= e(admin_url('media')) ?>">Media</a><?php endif; ?>
+        <?php if (!empty($stats['menus'])): ?><a class="btn" href="<?= e(admin_url('settings/appearance/menus')) ?>">Menus</a><?php endif; ?>
+        <?php if (!empty($job['opts']['redirects'])): ?><a class="btn" href="<?= e(admin_url('settings/seo/redirects')) ?>">Redirects</a><?php endif; ?>
+        <?php if (!empty($report['templates'])): ?><a class="btn" href="<?= e(admin_url('templates')) ?>">Templates</a><?php endif; ?>
+        <a class="btn" href="<?= e($base . '?tab=items') ?>">Old and new addresses</a>
+      </div>
+      <?php if ($structure): ?>
+        <p class="small muted" style="margin:0"><?= icon('link', 13) ?> Post addresses: WordPress <code><?= e((string)($structure['wordpress'] ?? '?')) ?></code>, Slate <code><?= e((string)($structure['permalink'] ?? '?')) ?></code>. Every address that changed redirects to its new one.</p>
+      <?php endif; ?>
+    </div>
+  </section>
+
+  <?php foreach ($catLabels as $cat => [$label, $ic]): if (empty($report[$cat])) continue; $r = $report[$cat]; ?>
+    <section class="card wpi-report">
+      <div class="card-head row-between"><h2><?= icon($ic, 16) ?> <?= e($label) ?></h2>
+        <span class="wpi-tags"><?php foreach ((array)($r['counts'] ?? []) as $k => $v): ?><span class="pill<?= in_array($k, ['failed', 'skipped', 'rebuilt_offline', 'no_alt'], true) ? ' pill-warn' : '' ?>"><?= number_format((int)$v) ?> <?= e($countLabel((string)$k)) ?></span><?php endforeach; ?></span>
+      </div>
+      <?php if (!empty($r['warnings'])): ?>
+        <div class="card-pad stack-sm"><?php foreach ($r['warnings'] as $w): ?><p class="small wpi-skip" style="margin:0"><?= icon('alert', 13) ?> <?= e((string)$w) ?></p><?php endforeach; ?></div>
+      <?php endif; ?>
+      <?php if (!empty($r['items'])): ?>
+        <div class="table-wrap"><table class="table table-compact">
+          <tbody>
+          <?php foreach (array_slice($r['items'], 0, 60) as $it): ?>
+            <tr>
+              <td><strong><?= e((string)$it['title']) ?></strong><br><small class="muted"><?= e((string)$it['note']) ?></small></td>
+              <td class="wpi-actions">
+                <?php if ($it['url'] !== ''): ?><a class="btn btn-sm btn-ghost" href="<?= e((string)$it['url']) ?>" target="_blank" rel="noopener"><?= icon('eye', 14) ?> View</a><?php endif; ?>
+                <?php if ($it['edit'] !== ''): ?><a class="btn btn-sm btn-ghost" href="<?= e((string)$it['edit']) ?>"><?= icon('edit', 14) ?> Edit</a><?php endif; ?>
+                <?php if ($ai && ($it['ai'] ?? '') !== ''): ?><button class="btn btn-sm" type="button" data-goraiya-ask="<?= e((string)$it['ai']) ?>"><?= icon('sparrow', 14) ?> Improve with Goraiya</button><?php endif; ?>
+              </td>
+            </tr>
+          <?php endforeach; ?>
+          </tbody>
+        </table></div>
+        <?php if (count($r['items']) > 60): ?><p class="card-pad muted small" style="margin:0">And <?= count($r['items']) - 60 ?> more.</p><?php endif; ?>
+      <?php endif; ?>
+    </section>
+  <?php endforeach; ?>
+
+  <section class="card">
+    <div class="card-pad row-between">
+      <span class="muted small"><?= $ai ? 'The import never needs AI. Goraiya can review a page and improve it; every change is kept as a revision.' : 'The import never needs AI. Connect one (Goraiya, in the top bar) if you want imported pages reviewed and improved automatically.' ?></span>
+      <div class="page-actions">
+        <?php if ($scan): ?><a class="btn" href="<?= e($base . '?step=choose') ?>"><?= icon('refresh', 15) ?> Sync again</a><?php endif; ?>
+        <a class="btn" href="<?= e($base . '?step=source') ?>">New migration</a>
+        <details class="wpi-log-box"><summary class="btn btn-ghost btn-sm">Activity log</summary><pre class="wpi-log"><?= e(implode("\n", array_slice($job['log'] ?? [], -120))) ?></pre></details>
       </div>
     </div>
   </section>
 <?php endif; ?>
 </div>
-<style>
-.wpi-bar{height:8px;border-radius:99px;background:var(--surface-3);overflow:hidden}
-.wpi-bar i{display:block;height:100%;background:var(--accent);border-radius:99px;transition:width .4s}
-.wpi-log{max-height:300px;font-size:12px;line-height:1.6;margin:0;white-space:pre-wrap}
-</style>
-<script>
-document.addEventListener('DOMContentLoaded', function () {
-  const root = document.querySelector('[data-wpi]');
-  if (!root) return;
-  const { toast, esc } = window.Slate;
-  const base = root.dataset.base;
-  const $ = (s) => root.querySelector(s);
-  const post = async (path, body, isForm) => {
-    try {
-      const res = await fetch(base + path, { method: 'POST', credentials: 'same-origin', body: isForm ? body : JSON.stringify(body || {}),
-        headers: Object.assign({ 'X-CSRF-Token': SLATE.csrf, 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest' }, isForm ? {} : { 'Content-Type': 'application/json' }) });
-      const t = await res.text();
-      try { return JSON.parse(t); } catch (e) { return { ok: false, error: 'Server error (' + res.status + '): ' + t.replace(/<[^>]+>/g, ' ').slice(0, 300) }; }
-    } catch (e) { return { ok: false, error: 'Network error, ' + e.message }; }
-  };
-
-  // Step 1, source
-  root.querySelectorAll('input[name="wpi_src"]').forEach((r) => r.addEventListener('change', () => {
-    root.querySelectorAll('[data-src-panel]').forEach((p) => { p.hidden = p.dataset.srcPanel !== r.value; });
-  }));
-  $('[data-connect]')?.addEventListener('click', async (e) => {
-    const b = e.currentTarget;
-    const src = (root.querySelector('input[name="wpi_src"]:checked') || {}).value || 'rest';
-    let r;
-    b.classList.add('is-loading');
-    if (src === 'wxr') {
-      const f = $('[data-file]').files[0];
-      if (!f) { b.classList.remove('is-loading'); return toast('Choose the export file', 'error'); }
-      const fd = new FormData(); fd.append('file', f); r = await post('/upload', fd, true);
-    } else {
-      r = await post('/connect', { url: $('[data-in="url"]').value, user: $('[data-in="user"]').value, password: $('[data-in="password"]').value });
-    }
-    if (!r.ok) { b.classList.remove('is-loading'); return toast(r.error || 'Failed', 'error', 9000); }
-    location.href = base + '?step=review';
-  });
-
-  // Step 2, review
-  $('[data-start]')?.addEventListener('click', async (e) => {
-    const options = { types: [...root.querySelectorAll('[data-type]:checked')].map((c) => c.dataset.type) };
-    root.querySelectorAll('[data-opt]').forEach((c) => { options[c.dataset.opt] = c.checked; });
-    if (!options.types.length) return toast('Select at least one content type', 'error');
-    const btn = e.currentTarget;
-    btn.classList.add('is-loading');
-    const r = await post('/start', { options });
-    if (!r.ok) { btn.classList.remove('is-loading'); return toast(r.error, 'error', 8000); }
-    location.href = base + '?step=run&go=1';
-  });
-
-  // Step 3, run
-  const labels = <?= json_encode(['terms' => 'Categories & tags', 'media' => 'Media files', 'media_failed' => 'Media failed', 'menus' => 'Menus', 'archives' => 'Archive pages']) ?>;
-  let running = false;
-  const render = (r) => {
-    $('[data-bar]').style.width = r.progress + '%';
-    $('[data-pct]').textContent = r.progress + '%';
-    $('[data-step-label]').textContent = r.step;
-    $('[data-label]').innerHTML = '<span class="pill pill-info">Running</span>';
-    $('[data-stats]').innerHTML = Object.entries(r.stats || {}).map(([k, v]) => '<span class="pill">' + esc(labels[k] || k) + ': ' + v + '</span>').join('');
-    const log = $('[data-log]'); log.textContent = (r.log || []).join('\n'); log.scrollTop = log.scrollHeight;
-  };
-  const loop = async () => {
-    if (running || !$('[data-bar]')) return;
-    running = true;
-    const btn = $('[data-resume]');
-    if (btn) btn.hidden = true;
-    let fails = 0;
-    while (running) {
-      const r = await post('/step');
-      if (!r.ok) {
-        if (++fails > 4) { toast(r.error || 'Import paused', 'error', 9000); running = false; if (btn) btn.hidden = false; $('[data-label]').innerHTML = '<span class="pill pill-warn">Paused</span>'; break; }
-        await new Promise((res) => setTimeout(res, 2000 * fails));
-        continue;
-      }
-      fails = 0;
-      render(r);
-      if (r.done) { running = false; toast('Import finished!'); location.href = base + '?step=run'; break; }
-    }
-  };
-  $('[data-resume]')?.addEventListener('click', loop);
-  if (new URLSearchParams(location.search).get('go') === '1') loop();
-});
-</script>
+<script>window.WPI_LABELS = <?= json_encode(['terms' => 'Categories & tags', 'media' => 'Media files', 'media_failed' => 'Media failed', 'menus' => 'Menus', 'archives' => 'Archive pages'], JSON_HEX_TAG) ?>;</script>
+<script src="<?= e($asset('importer.js')) ?>" defer></script>
